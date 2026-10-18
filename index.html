@@ -370,7 +370,32 @@
             FIRESTORE_READY = false;
         }
 
-        const LICENSES = {};
+        let LICENSES = {};
+
+        // Fetch shop credentials from Firebase
+        async function LOAD_LICENSES() {
+            if (!FIRESTORE_READY) return;
+            try {
+                const docSnap = await FB.collection('credentials').doc('shopLicenses').get();
+                if (docSnap.exists) {
+                    const data = docSnap.data();
+                    if (data.licenses) {
+                        LICENSES = {};
+                        for (let licenseKey in data.licenses) {
+                            LICENSES[licenseKey] = data.licenses[licenseKey].shopName;
+                        }
+                        console.log('✅ Licenses loaded from Firebase:', Object.keys(LICENSES).length, 'shops');
+                    }
+                } else {
+                    console.warn('⚠️ credentials/shopLicenses not found in Firebase');
+                }
+            } catch(err) {
+                console.error('❌ Error loading licenses:', err);
+            }
+        }
+
+        // Load licenses when page loads
+        LOAD_LICENSES();
 
         let DB = {
             shop: '',
