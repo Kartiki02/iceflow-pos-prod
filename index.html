@@ -362,39 +362,63 @@
 		};
 
         let FB = null, FIRESTORE_READY = false;
+        const ENV = window.location.hostname.includes('uat') ? 'uat' : 'prod';
+
+        console.log('🌍 ENVIRONMENT:', ENV);
+        console.log('🔗 URL:', window.location.hostname);
+
         try {
+            console.log('🔄 Initializing Firebase with config:', firebaseConfig.projectId);
             firebase.initializeApp(firebaseConfig);
             FB = firebase.firestore();
             FIRESTORE_READY = true;
+            console.log('✅ Firebase initialized successfully!');
+            console.log('📦 Project:', firebaseConfig.projectId);
         } catch(e) {
             FIRESTORE_READY = false;
+            console.error('❌ Firebase initialization FAILED:', e);
         }
 
         let LICENSES = {};
 
         // Fetch shop credentials from Firebase
         async function LOAD_LICENSES() {
-            if (!FIRESTORE_READY) return;
+            console.log('🔐 LOAD_LICENSES started...');
+            if (!FIRESTORE_READY) {
+                console.error('❌ FIRESTORE NOT READY - Cannot load licenses');
+                return;
+            }
             try {
+                console.log('📡 Fetching from credentials/shopLicenses...');
                 const docSnap = await FB.collection('credentials').doc('shopLicenses').get();
+                console.log('📋 Firebase fetch completed');
+
                 if (docSnap.exists) {
                     const data = docSnap.data();
-                    if (data.licenses) {
+                    console.log('📊 Full document data:', data);
+                    console.log('🔑 Type of licenses:', typeof data.licenses);
+                    console.log('🔑 licenses value:', data.licenses);
+
+                    if (data.licenses && typeof data.licenses === 'object') {
                         LICENSES = {};
                         for (let licenseKey in data.licenses) {
                             LICENSES[licenseKey] = data.licenses[licenseKey].shopName;
+                            console.log(`   ✓ Added: ${licenseKey} → ${data.licenses[licenseKey].shopName}`);
                         }
-                        console.log('✅ Licenses loaded from Firebase:', Object.keys(LICENSES).length, 'shops');
+                        console.log('✅ Licenses loaded successfully:', LICENSES);
+                    } else {
+                        console.error('❌ licenses is not a proper object:', data.licenses);
                     }
                 } else {
-                    console.warn('⚠️ credentials/shopLicenses not found in Firebase');
+                    console.error('❌ Document credentials/shopLicenses DOES NOT EXIST in Firebase');
                 }
             } catch(err) {
-                console.error('❌ Error loading licenses:', err);
+                console.error('❌ Error loading licenses:', err.message, err);
             }
         }
 
         // Load licenses when page loads
+        console.log('⏱️ Calling LOAD_LICENSES on page load...');
         LOAD_LICENSES();
 
         let DB = {
@@ -423,9 +447,29 @@
         let EDIT_ID = null, CURRENT_BILL = null, CHART_INSTANCE = null;
 
         async function LOGIN() {
-            const shop = document.getElementById('shopInput').value;
-            const key = document.getElementById('keyInput').value;
+            const shop = document.getElementById('shopInput').value.trim();
+            const key = document.getElementById('keyInput').value.trim();
+
+            console.log('🔐 === LOGIN ATTEMPT ===');
+            console.log('👤 Shop Name entered:', `"${shop}"`, `(length: ${shop.length})`);
+            console.log('🔑 License Key entered:', `"${key}"`, `(length: ${key.length})`);
+            console.log('📂 All loaded licenses:', LICENSES);
+            console.log('🔍 Is key in LICENSES?', key in LICENSES);
+
+            if (key in LICENSES) {
+                const storedShop = LICENSES[key];
+                console.log('✓ Key found! Stored shop:', `"${storedShop}"`, `(length: ${storedShop.length})`);
+                console.log('🔄 Exact match check:', shop === storedShop);
+                console.log('📋 Character comparison:');
+                console.log('   Entered:', JSON.stringify(shop));
+                console.log('   Stored: ', JSON.stringify(storedShop));
+            } else {
+                console.error('✗ Key NOT found in LICENSES');
+                console.log('   Available keys:', Object.keys(LICENSES));
+            }
+
             if (LICENSES[key] === shop) {
+                console.log('✅ LOGIN SUCCESSFUL!');
                 DB.shop = shop;
                 document.getElementById('login').style.display = 'none';
                 document.getElementById('app').classList.add('show');
@@ -433,6 +477,7 @@
                 await LOAD();
                 RENDER_ALL();
             } else {
+                console.error('❌ LOGIN FAILED - Credentials do not match');
                 alert('Invalid credentials!');
             }
         }
