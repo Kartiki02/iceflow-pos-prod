@@ -384,17 +384,28 @@
         addLog('🌍 ENVIRONMENT: ' + ENV);
         addLog('🔗 URL: ' + window.location.hostname);
 
-        try {
-            addLog('🔄 Initializing Firebase...');
-            addLog('📦 Project: ' + firebaseConfig.projectId);
-            firebase.initializeApp(firebaseConfig);
-            FB = firebase.firestore();
-            FIRESTORE_READY = true;
-            addLog('✅ Firebase initialized successfully!');
-        } catch(e) {
-            FIRESTORE_READY = false;
-            addLog('❌ Firebase FAILED: ' + e.message);
+        // Wait for Firebase SDK to load
+        function initializeFirebase() {
+            try {
+                if (typeof firebase === 'undefined') {
+                    addLog('⏳ Waiting for Firebase...');
+                    setTimeout(initializeFirebase, 500);
+                    return;
+                }
+                addLog('🔄 Initializing Firebase...');
+                addLog('📦 Project: ' + firebaseConfig.projectId);
+                firebase.initializeApp(firebaseConfig);
+                FB = firebase.firestore();
+                FIRESTORE_READY = true;
+                addLog('✅ Firebase initialized successfully!');
+                LOAD_LICENSES();
+            } catch(e) {
+                FIRESTORE_READY = false;
+                addLog('❌ Firebase FAILED: ' + e.message);
+            }
         }
+
+        initializeFirebase();
 
         let LICENSES = {};
 
@@ -434,9 +445,6 @@
             }
         }
 
-        // Load licenses when page loads
-        console.log('⏱️ Calling LOAD_LICENSES on page load...');
-        LOAD_LICENSES();
 
         let DB = {
             shop: '',
