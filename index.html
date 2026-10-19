@@ -426,7 +426,12 @@
                 FB = window.firebaseModules.getFirestore();
                 FIRESTORE_READY = true;
                 addLog('✅ Firebase initialized successfully!');
-                LOAD_LICENSES();
+                addLog('🔑 Starting license load...');
+                LOAD_LICENSES().then(() => {
+                    addLog('✓ LOAD_LICENSES completed');
+                }).catch(err => {
+                    addLog('❌ LOAD_LICENSES error: ' + err.message);
+                });
             } catch(e) {
                 FIRESTORE_READY = false;
                 addLog('❌ Init failed: ' + e.message);
