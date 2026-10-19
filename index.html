@@ -4,8 +4,24 @@
     <title>IceFlow POS - Enterprise</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js"></script>
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
+        import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js';
+
+        window.firebaseModules = {
+            initializeApp: initializeApp,
+            getFirestore: getFirestore,
+            collection: collection,
+            doc: doc,
+            getDoc: getDoc,
+            setDoc: setDoc,
+            updateDoc: updateDoc,
+            deleteDoc: deleteDoc,
+            getDocs: getDocs,
+            query: query,
+            where: where
+        };
+    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%); min-height: 100vh; color: #2c3e50; }
@@ -385,27 +401,44 @@
         addLog('🔗 URL: ' + window.location.hostname);
 
         // Wait for Firebase SDK to load
+        let firebaseWaitCount = 0;
         function initializeFirebase() {
-            try {
-                if (typeof firebase === 'undefined') {
-                    addLog('⏳ Waiting for Firebase...');
-                    setTimeout(initializeFirebase, 500);
+            firebaseWaitCount++;
+
+            if (typeof window.firebaseModules === 'undefined') {
+                if (firebaseWaitCount > 20) {
+                    addLog('❌ Firebase SDK TIMEOUT - Not loading');
+                    addLog('Check: Network tab in DevTools');
                     return;
                 }
+                if (firebaseWaitCount % 5 === 0) {
+                    addLog('⏳ Waiting for Firebase... (' + (firebaseWaitCount * 500 / 1000).toFixed(1) + 's)');
+                }
+                setTimeout(initializeFirebase, 500);
+                return;
+            }
+
+            addLog('✓ Firebase SDK loaded');
+            try {
                 addLog('🔄 Initializing Firebase...');
                 addLog('📦 Project: ' + firebaseConfig.projectId);
-                firebase.initializeApp(firebaseConfig);
-                FB = firebase.firestore();
+                window.firebaseModules.initializeApp(firebaseConfig);
+                FB = window.firebaseModules.getFirestore();
                 FIRESTORE_READY = true;
                 addLog('✅ Firebase initialized successfully!');
                 LOAD_LICENSES();
             } catch(e) {
                 FIRESTORE_READY = false;
-                addLog('❌ Firebase FAILED: ' + e.message);
+                addLog('❌ Init failed: ' + e.message);
             }
         }
 
-        initializeFirebase();
+        // Run after page fully loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeFirebase);
+        } else {
+            initializeFirebase();
+        }
 
         let LICENSES = {};
 
@@ -418,10 +451,10 @@
             }
             try {
                 console.log('📡 Fetching from credentials/shopLicenses...');
-                const docSnap = await FB.collection('credentials').doc('shopLicenses').get();
+                const docSnap = await window.firebaseModules.getDoc(window.firebaseModules.doc(FB, 'credentials', 'shopLicenses'));
                 console.log('📋 Firebase fetch completed');
 
-                if (docSnap.exists) {
+                if (docSnap.exists()) {
                     const data = docSnap.data();
                     console.log('📊 Full document data:', data);
                     console.log('🔑 Type of licenses:', typeof data.licenses);
