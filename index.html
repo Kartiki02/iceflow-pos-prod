@@ -107,6 +107,11 @@
             <input id="shopInput" type="text" placeholder="Shop Name">
             <input id="keyInput" type="password" placeholder="License Key">
             <button onclick="LOGIN()">Login</button>
+
+            <div id="debugPanel" style="margin-top: 20px; padding: 10px; background: #f5f5f5; border-radius: 5px; font-size: 11px; color: #333; max-height: 150px; overflow-y: auto; border: 1px solid #ddd; font-family: monospace;">
+                <strong style="display: block; margin-bottom: 5px;">📊 Debug:</strong>
+                <div id="debugLogs" style="white-space: pre-wrap; word-break: break-all; line-height: 1.4;"></div>
+            </div>
         </div>
     </div>
 
@@ -361,22 +366,34 @@
 			appId: "1:568174325949:web:70fc768d85d263643bc7d4"
 		};
 
+        // Debug logging function - displays on screen
+        const debugLogs = [];
+        function addLog(msg) {
+            debugLogs.push(msg);
+            console.log(msg);
+            const el = document.getElementById('debugLogs');
+            if (el) {
+                el.textContent = debugLogs.slice(-15).join('\n');
+                el.parentElement.scrollTop = el.parentElement.scrollHeight;
+            }
+        }
+
         let FB = null, FIRESTORE_READY = false;
         const ENV = window.location.hostname.includes('uat') ? 'uat' : 'prod';
 
-        console.log('🌍 ENVIRONMENT:', ENV);
-        console.log('🔗 URL:', window.location.hostname);
+        addLog('🌍 ENVIRONMENT: ' + ENV);
+        addLog('🔗 URL: ' + window.location.hostname);
 
         try {
-            console.log('🔄 Initializing Firebase with config:', firebaseConfig.projectId);
+            addLog('🔄 Initializing Firebase...');
+            addLog('📦 Project: ' + firebaseConfig.projectId);
             firebase.initializeApp(firebaseConfig);
             FB = firebase.firestore();
             FIRESTORE_READY = true;
-            console.log('✅ Firebase initialized successfully!');
-            console.log('📦 Project:', firebaseConfig.projectId);
+            addLog('✅ Firebase initialized successfully!');
         } catch(e) {
             FIRESTORE_READY = false;
-            console.error('❌ Firebase initialization FAILED:', e);
+            addLog('❌ Firebase FAILED: ' + e.message);
         }
 
         let LICENSES = {};
