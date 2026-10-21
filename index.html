@@ -109,10 +109,6 @@
             <input id="keyInput" type="password" placeholder="License Key" autocomplete="new-password">
             <button id="loginBtn" onclick="LOGIN()">Login</button>
 
-            <div id="debugPanel" style="margin-top: 20px; padding: 10px; background: #f5f5f5; border-radius: 5px; font-size: 11px; color: #333; max-height: 150px; overflow-y: auto; border: 1px solid #ddd; font-family: monospace;">
-                <strong style="display: block; margin-bottom: 5px;">📊 Debug:</strong>
-                <div id="debugLogs" style="white-space: pre-wrap; word-break: break-all; line-height: 1.4;"></div>
-            </div>
         </div>
     </div>
 
@@ -326,7 +322,7 @@
             <input id="itemModalName" type="text" placeholder="Item name">
             <select id="itemModalCat"></select>
             <input id="itemModalPrice" type="number" placeholder="Price" min="0">
-            <input id="itemModalStock" type="number" placeholder="Stock" min="0">
+            <input id="itemModalStock" type="number" placeholder="Stock">
             <button class="btn btn-success" onclick="SAVE_ITEM()" style="margin-top: 15px; width: 100%;">Save</button>
             <button class="btn btn-danger" onclick="CLOSE_MODAL('itemModal')" style="width: 100%;">Cancel</button>
         </div>
@@ -542,7 +538,7 @@
             } catch (e) {
                 console.error('Cloud load failed:', e.message);
                 CLOUD_LOADED = false;
-                if (!confirm('Cannot reach the cloud database.\n\nContinue in OFFLINE mode? Changes will be saved only on this device and will NOT sync.')) return false;
+                if (!confirm('Cannot load data from the cloud database.\n(' + (e.code || e.message) + ')\n\nContinue in OFFLINE mode? Changes will be saved only on this device and will NOT sync.')) return false;
                 try {
                     const raw = localStorage.getItem(cacheKey());
                     if (raw) { const l = JSON.parse(raw); DB.cats = l.cats || []; DB.items = l.items || []; DB.orders = l.orders || []; DB.inventoryBills = l.inventoryBills || []; }
@@ -616,7 +612,7 @@
             }
             let html = '';
             for (const i of items) {
-                html += '<div class="menu-item" ' + (i.stock <= 0 ? 'style="opacity:.45"' : '') + ' onclick="ADD_ITEM(' + Number(i.id) + ')">' + esc(i.icon || '📦') + '<br>' + esc(i.name) + '<br>₹' + esc(i.price) + '</div>';
+                html += '<div class="menu-item" onclick="ADD_ITEM(' + Number(i.id) + ')">' + esc(i.icon || '📦') + '<br>' + esc(i.name) + '<br>₹' + esc(i.price) + '</div>';
             }
             el('menuItems').innerHTML = html;
         }
@@ -626,8 +622,6 @@
             if (!item) return;
             const cart = DB.carts[DB.currentCart];
             const existing = cart.find(i => i.id === id);
-            const have = existing ? existing.qty : 0;
-            if (have + 1 > item.stock) { alert(item.stock <= 0 ? 'Out of stock' : 'Only ' + item.stock + ' in stock'); return; }
             if (existing) existing.qty++;
             else cart.push({ id: item.id, name: item.name, price: item.price, icon: item.icon, qty: 1 });
             RENDER_CART();
@@ -648,10 +642,6 @@
             const cart = DB.carts[DB.currentCart];
             const line = cart.find(i => i.id === id);
             if (!line) return;
-            if (change > 0) {
-                const item = DB.items.find(i => i.id === id);
-                if (!item || line.qty + change > item.stock) { alert('Only ' + (item ? item.stock : 0) + ' in stock'); return; }
-            }
             line.qty += change;
             if (line.qty <= 0) DB.carts[DB.currentCart] = cart.filter(i => i.id !== id);
             RENDER_CART();
@@ -766,8 +756,7 @@
                 for (const c of cart) {
                     const it = newItems.find(x => x.id === c.id);
                     if (!it) { alert(c.name + ' no longer exists in the menu.'); return; }
-                    if (it.stock < c.qty) { alert('Not enough stock for ' + it.name + ' (available: ' + it.stock + ')'); return; }
-                    it.stock -= c.qty;
+                    it.stock -= c.qty;      // stock is allowed to go negative
                 }
 
                 if (CLOUD_LOADED) {
@@ -794,10 +783,36 @@
                 CACHE_LOCAL();
                 el('checkoutModal').classList.remove('show');
                 RENDER_CART(); RENDER_MENU(); RENDER_INV_TABLE(); RENDER_BILLS_TABLE();
-                alert('✅ Order complete!\n' + order.id + (method === 'cash' && order.change > 0 ? '\nReturn change: ₹' + Math.round(order.change) : ''));
+                SHOW_ORDER_TOAST(order);
             } finally {
                 CHECKING_OUT = false; btn.disabled = false;
             }
+        }
+
+        // Non-blocking confirmation: does not interrupt the cashier. Auto-hides; the change amount stays longer.
+        function SHOW_ORDER_TOAST(order) {
+            if (!el('toastStyle')) {
+                const st = document.createElement('style');
+                st.id = 'toastStyle';
+                st.textContent = '#toastBox{position:fixed;right:20px;bottom:20px;z-index:3000;display:flex;flex-direction:column;gap:10px}' +
+                    '.toast{background:#fff;border-left:6px solid #27ae60;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:14px 18px;min-width:260px;max-width:340px;animation:toastIn .25s ease-out;cursor:pointer}' +
+                    '.toast .t-title{font-weight:700;color:#27ae60;font-size:14px}.toast .t-sub{font-size:12px;color:#7f8c8d;margin-top:2px}' +
+                    '.toast .t-change{margin-top:8px;padding:8px 10px;background:#fff4e5;border-radius:8px;font-weight:700;color:#d35400;font-size:15px}' +
+                    '.toast a{color:#667eea;font-size:12px;font-weight:600;margin-top:8px;display:inline-block}' +
+                    '@keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}';
+                document.head.appendChild(st);
+                const box = document.createElement('div'); box.id = 'toastBox'; document.body.appendChild(box);
+            }
+            const hasChange = order.method === 'cash' && order.change > 0;
+            const t = document.createElement('div');
+            t.className = 'toast';
+            t.innerHTML = '<div class="t-title">✅ Order complete - ₹' + Math.round(order.total) + '</div>' +
+                '<div class="t-sub">' + esc(order.id) + ' · ' + esc(order.method) + '</div>' +
+                (hasChange ? '<div class="t-change">Return change: ₹' + Math.round(order.change) + '</div>' : '') +
+                '<a href="#" onclick="event.stopPropagation(); VIEW_BILL(\'' + esc(order.id) + '\'); this.parentNode.remove(); return false;">View bill</a>';
+            t.onclick = () => t.remove();
+            el('toastBox').appendChild(t);
+            setTimeout(() => t.remove(), hasChange ? 10000 : 4000);
         }
 
         // ---------- admin: categories ----------
@@ -921,7 +936,7 @@
             if (!name) { alert('Item name is required'); return; }
             if (!cat) { alert('Category is required'); return; }
             if (isNaN(price) || price < 0) { alert('Price must be a valid number'); return; }
-            if (isNaN(stock) || stock < 0) { alert('Stock must be a valid number'); return; }
+            if (isNaN(stock)) { alert('Stock must be a valid number'); return; }
 
             if (EDIT_ID) {
                 const item = DB.items.find(i => i.id === EDIT_ID);
@@ -1111,9 +1126,42 @@
             }
             let html = '<tr><th>Order ID</th><th>Date</th><th>Amount</th><th>Payment</th><th>Customer</th><th>Contact</th><th>Action</th></tr>';
             list.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(b => {
-                html += '<tr><td>' + esc(b.id) + '</td><td>' + esc(fmtDateTime(b.date)) + '</td><td>₹' + Math.round(b.total) + '</td><td>' + esc(b.method) + '</td><td>' + esc(b.customer.name || '—') + '</td><td>' + esc(b.customer.contact || '—') + '</td><td><button class="btn" onclick="VIEW_BILL(\'' + esc(b.id) + '\')">View</button><button class="btn btn-success" onclick="DOWNLOAD_PDF(\'' + esc(b.id) + '\')">PDF</button></td></tr>';
+                html += '<tr><td>' + esc(b.id) + '</td><td>' + esc(fmtDateTime(b.date)) + '</td><td>₹' + Math.round(b.total) + '</td><td>' + esc(b.method) + '</td><td>' + esc(b.customer.name || '—') + '</td><td>' + esc(b.customer.contact || '—') + '</td><td><button class="btn" onclick="VIEW_BILL(\'' + esc(b.id) + '\')">View</button><button class="btn btn-success" onclick="DOWNLOAD_PDF(\'' + esc(b.id) + '\')">PDF</button>' +
+                    (new Date(b.date).toDateString() === new Date().toDateString() ? '<button class="btn btn-danger" onclick="DELETE_ORDER(\'' + esc(b.id) + '\')">Delete</button>' : '') + '</td></tr>';
             });
             el('billsTable').innerHTML = html;
+        }
+
+        // Only today's orders can be deleted. Stock of the sold items is added back.
+        async function DELETE_ORDER(id) {
+            const order = DB.orders.find(o => o.id === id);
+            if (!order) return;
+            if (new Date(order.date).toDateString() !== new Date().toDateString()) { alert("Only today's orders can be deleted."); return; }
+            if (!confirm('Delete order ' + order.id + ' (₹' + Math.round(order.total) + ')?\nThe items will be added back to stock.')) return;
+
+            const newItems = DB.items.map(i => ({ ...i }));
+            order.items.forEach(l => { const it = newItems.find(x => x.id === l.id); if (it) it.stock += l.qty; });
+
+            if (CLOUD_LOADED) {
+                try {
+                    SET_SYNC('saving');
+                    const ref = FB.collection('shops').doc(SHOP);
+                    const batch = FB.batch();
+                    batch.delete(ref.collection('orders').doc(id));
+                    batch.set(ref, { lastUpdated: new Date().toISOString(), data: clean({ cats: DB.cats, items: newItems }) });
+                    await withTimeout(batch.commit(), 15000);
+                    SET_SYNC('ok');
+                } catch (e) {
+                    SET_SYNC('error');
+                    alert('Could not delete the order in the cloud. Nothing was changed - try again.');
+                    return;
+                }
+            }
+            DB.items = newItems;
+            DB.orders = DB.orders.filter(o => o.id !== id);
+            CACHE_LOCAL();
+            RENDER_BILLS_TABLE(); RENDER_INV_TABLE(); RENDER_MENU();
+            if (el('reports').classList.contains('show')) RENDER_REPORTS();
         }
 
         function CLEAR_DATE_FILTER() { el('billsDateFilter').value = ''; RENDER_BILLS_TABLE(); }
