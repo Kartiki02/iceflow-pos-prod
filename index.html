@@ -1378,7 +1378,7 @@
         }
 
         function SAVE() {
-            localStorage.setItem('iceflow_' + DB.shop, JSON.stringify(DB));
+			localStorage.setItem('iceflow_prod_' + DB.shop, JSON.stringify(DB));
             if (FIRESTORE_READY) {
                 SAVE_TO_FIREBASE();
             }
@@ -1388,7 +1388,7 @@
             if (FIRESTORE_READY) {
                 if (await LOAD_FROM_FIREBASE()) return;
             }
-            let data = localStorage.getItem('iceflow_' + DB.shop);
+			let data = localStorage.getItem('iceflow_prod_' + DB.shop);
             if (data) DB = JSON.parse(data);
         }
 
