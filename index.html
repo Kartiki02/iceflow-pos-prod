@@ -105,9 +105,9 @@
     <div id="login" class="login-screen">
         <div class="login-box">
             <h1>🍦 IceFlow</h1>
-            <input id="shopInput" type="text" placeholder="Shop Name">
-            <input id="keyInput" type="password" placeholder="License Key">
-            <button onclick="LOGIN()">Login</button>
+            <input id="shopInput" type="text" placeholder="Shop Name" autocomplete="off">
+            <input id="keyInput" type="password" placeholder="License Key" autocomplete="new-password">
+            <button id="loginBtn" onclick="LOGIN()">Login</button>
 
             <div id="debugPanel" style="margin-top: 20px; padding: 10px; background: #f5f5f5; border-radius: 5px; font-size: 11px; color: #333; max-height: 150px; overflow-y: auto; border: 1px solid #ddd; font-family: monospace;">
                 <strong style="display: block; margin-bottom: 5px;">📊 Debug:</strong>
@@ -119,12 +119,13 @@
     <!-- APP -->
     <div id="app" class="app-screen">
         <div class="header">
-            <div>🍦 IceFlow Enterprise - <span id="shopName"></span></div>
+            <div>🍦 IceFlow Enterprise - <span id="shopName"></span> <span id="syncStatus" style="font-size:12px; margin-left:12px;"></span></div>
             <div class="header-right">
-                <button class="active" onclick="SHOW_TAB('pos')">POS</button>
-                <button onclick="SHOW_TAB('admin')">Admin</button>
-                <button onclick="SHOW_TAB('reports')">Reports</button>
-                <button onclick="SHOW_TAB('bills')">Bills</button>
+                <button class="active" data-tab="pos" onclick="SHOW_TAB('pos')">POS</button>
+                <button data-tab="admin" onclick="SHOW_TAB('admin')">Admin</button>
+                <button data-tab="reports" onclick="SHOW_TAB('reports')">Reports</button>
+                <button data-tab="bills" onclick="SHOW_TAB('bills')">Bills</button>
+                <button onclick="REFRESH_DATA()" title="Reload data from cloud">↻ Refresh</button>
                 <button onclick="LOGOUT()" style="background: #e74c3c;">Logout</button>
             </div>
         </div>
@@ -173,30 +174,16 @@
                 <div class="card">
                     <h2>Sales Analytics</h2>
                     <div class="period-buttons">
-                        <button class="active" onclick="REPORT_PERIOD('today')">Today</button>
-                        <button onclick="REPORT_PERIOD('weekly')">Weekly</button>
-                        <button onclick="REPORT_PERIOD('monthly')">Monthly</button>
-                        <button onclick="REPORT_PERIOD('yearly')">Yearly</button>
-                        <button onclick="REPORT_PERIOD('custom')">Custom Year</button>
+                        <button class="active" data-period="today" onclick="REPORT_PERIOD('today')">Today</button>
+                        <button data-period="weekly" onclick="REPORT_PERIOD('weekly')">Weekly</button>
+                        <button data-period="monthly" onclick="REPORT_PERIOD('monthly')">Monthly</button>
+                        <button data-period="yearly" onclick="REPORT_PERIOD('yearly')">Yearly</button>
+                        <button data-period="custom" onclick="REPORT_PERIOD('custom')">Custom Year</button>
                     </div>
 
                     <div id="customYearSection" style="display: none; margin-bottom: 20px;">
                         <label>Select Year:</label>
-                        <select id="customYearSelect" onchange="RENDER_REPORTS()" style="padding: 10px; margin: 10px 0; border: 2px solid #e1e8ed; border-radius: 6px; width: 150px;">
-                            <option value="2024">2024</option>
-                            <option value="2025">2025</option>
-                            <option value="2026" selected>2026</option>
-                            <option value="2027">2027</option>
-                            <option value="2028">2028</option>
-                            <option value="2029">2029</option>
-                            <option value="2030">2030</option>
-                            <option value="2031">2031</option>
-                            <option value="2032">2032</option>
-                            <option value="2033">2033</option>
-                            <option value="2034">2034</option>
-                            <option value="2035">2035</option>
-                            <option value="2036">2036</option>
-                        </select>
+                        <select id="customYearSelect" onchange="RENDER_REPORTS()" style="padding: 10px; margin: 10px 0; border: 2px solid #e1e8ed; border-radius: 6px; width: 150px;"></select>
                     </div>
 
                     <div class="stats">
@@ -246,7 +233,7 @@
                     <h2>Franchise Inventory Bills</h2>
                     <div class="upload-box" id="uploadBox" onclick="document.getElementById('invFileInput').click()">
                         <p style="font-size: 14px;">📤 Click to upload or drag and drop</p>
-                        <p style="font-size: 11px; color: #7f8c8d;">PDF, Image, or Document (Max 3MB)</p>
+                        <p style="font-size: 11px; color: #7f8c8d;">PDF, Image, or Document (Max 600 KB)</p>
                     </div>
                     <input type="file" id="invFileInput" style="display: none;" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onchange="UPLOAD_INVENTORY_BILL(event)">
                     <table id="inventoryBillsTable"></table>
@@ -314,7 +301,7 @@
                     <input id="chkContact" type="text" placeholder="Phone/Email">
                 </div>
             </div>
-            <button class="btn btn-success" onclick="FINISH_CHECKOUT()" style="margin-top: 20px; width: 100%;">Complete Order</button>
+            <button id="completeBtn" class="btn btn-success" onclick="FINISH_CHECKOUT()" style="margin-top: 20px; width: 100%;">Complete Order</button>
             <button class="btn btn-danger" onclick="CLOSE_MODAL('checkoutModal')" style="width: 100%;">Cancel</button>
         </div>
     </div>
@@ -357,1140 +344,897 @@
     </div>
 
     <script>
+        // ============================================================
+        // IceFlow POS - Production build
+        // Data model (Firestore):
+        //   credentials/shopLicenses            -> { licenses: { KEY: { shopName, status } } }
+        //   shops/{shop}                        -> { lastUpdated, data: { cats[], items[] } }
+        //   shops/{shop}/orders/{orderId}       -> one document per order (also used as the bill)
+        //   shops/{shop}/inventoryBills/{id}    -> one document per uploaded franchise bill
+        // Carts / UI state are kept in memory only (Firestore does not allow nested arrays).
+        // ============================================================
 
-		const firebaseConfig = {
-			apiKey: "AIzaSyA7ObnyKGf6ur2pRuttYhMFIR0w-qbPV_E",
-			authDomain: "iceflow-pos-prod.firebaseapp.com",
-			projectId: "iceflow-pos-prod",
-			storageBucket: "iceflow-pos-prod.firebasestorage.app",
-			messagingSenderId: "568174325949",
-			appId: "1:568174325949:web:70fc768d85d263643bc7d4"
-		};
+        const firebaseConfig = {
+            apiKey: "AIzaSyA7ObnyKGf6ur2pRuttYhMFIR0w-qbPV_E",
+            authDomain: "iceflow-pos-prod.firebaseapp.com",
+            projectId: "iceflow-pos-prod",
+            storageBucket: "iceflow-pos-prod.firebasestorage.app",
+            messagingSenderId: "568174325949",
+            appId: "1:568174325949:web:70fc768d85d263643bc7d4"
+        };
 
-        // Debug logging function - displays on screen
-        const debugLogs = [];
-        function addLog(msg) {
-            debugLogs.push(msg);
-            console.log(msg);
-            const el = document.getElementById('debugLogs');
-            if (el) {
-                el.textContent = debugLogs.slice(-15).join('\n');
-                el.parentElement.scrollTop = el.parentElement.scrollHeight;
-            }
-        }
+        const MAX_INV_FILE = 600 * 1024;          // Firestore documents are limited to 1 MB (base64 adds ~33%)
+        const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
         let FB = null, FIRESTORE_READY = false;
-        const ENV = window.location.hostname.includes('uat') ? 'uat' : 'prod';
+        let LICENSES = {}, LICENSES_STATE = 'loading', LICENSES_PROMISE = null;
+        let SHOP = '';
+        let CLOUD_LOADED = false;                 // true only if this session loaded data from the cloud
+        let CHART_INSTANCE = null, CURRENT_BILL = null, EDIT_ID = null, EDIT_CAT_NAME = null;
+        let PENDING_ORDER_ID = null, CHECKING_OUT = false;
 
-        addLog('🌍 ENVIRONMENT: ' + ENV);
-        addLog('🔗 URL: ' + window.location.hostname);
+        function newDB() {
+            return { cats: [], items: [], orders: [], inventoryBills: [],
+                     carts: [[],[],[],[],[]], currentCart: 0, currentCat: 'all', period: 'today' };
+        }
+        let DB = newDB();
 
-        // Wait for Firebase SDK to load
+        // ---------- helpers ----------
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function clean(o) { return JSON.parse(JSON.stringify(o)); }   // strips undefined (Firestore rejects it)
+        function withTimeout(p, ms) {
+            return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+        }
+        function fmtDate(d) { return new Date(d).toLocaleDateString('en-GB'); }
+        function fmtDateTime(d) { return new Date(d).toLocaleString('en-GB'); }
+        function el(id) { return document.getElementById(id); }
+
+        function SET_SYNC(state) {
+            const s = el('syncStatus'); if (!s) return;
+            const map = {
+                ok:      ['● Synced', '#7CFC9A'],
+                saving:  ['● Saving...', '#ffd166'],
+                error:   ['● Sync failed', '#ff8080'],
+                offline: ['● Offline mode (not saved to cloud)', '#ff8080']
+            };
+            s.textContent = map[state][0];
+            s.style.color = map[state][1];
+        }
+
+        // ---------- Firebase / licenses ----------
         let firebaseWaitCount = 0;
         function initializeFirebase() {
-            firebaseWaitCount++;
-
             if (typeof firebase === 'undefined') {
-                if (firebaseWaitCount > 20) {
-                    addLog('❌ Firebase SDK TIMEOUT - Not loading');
-                    addLog('Check: Network tab in DevTools');
-                    return;
-                }
-                if (firebaseWaitCount % 5 === 0) {
-                    addLog('⏳ Waiting for Firebase... (' + (firebaseWaitCount * 500 / 1000).toFixed(1) + 's)');
-                }
+                if (++firebaseWaitCount > 20) { LICENSES_STATE = 'error'; return; }
                 setTimeout(initializeFirebase, 500);
                 return;
             }
-
-            addLog('✓ Firebase SDK loaded');
             try {
-                addLog('🔄 Initializing Firebase...');
-                addLog('📦 Project: ' + firebaseConfig.projectId);
                 firebase.initializeApp(firebaseConfig);
                 FB = firebase.firestore();
                 FIRESTORE_READY = true;
-                addLog('✅ Firebase initialized successfully!');
-                addLog('🔑 Starting license load...');
-                LOAD_LICENSES().then(() => {
-                    addLog('✓ LOAD_LICENSES completed');
-                }).catch(err => {
-                    addLog('❌ LOAD_LICENSES error: ' + err.message);
-                });
-            } catch(e) {
-                FIRESTORE_READY = false;
-                addLog('❌ Init failed: ' + e.message);
+                LICENSES_PROMISE = LOAD_LICENSES();
+            } catch (e) {
+                console.error('Firebase init failed:', e.message);
+                LICENSES_STATE = 'error';
             }
         }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeFirebase);
+        else initializeFirebase();
 
-        // Run after page fully loads
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initializeFirebase);
-        } else {
-            initializeFirebase();
-        }
-
-        let LICENSES = {};
-
-        // Fetch shop credentials from Firebase
         async function LOAD_LICENSES() {
-            console.log('🔐 LOAD_LICENSES started...');
-            if (!FIRESTORE_READY) {
-                console.error('❌ FIRESTORE NOT READY - Cannot load licenses');
-                return;
-            }
             try {
-                console.log('📡 Fetching from credentials/shopLicenses...');
-                const docSnap = await FB.collection('credentials').doc('shopLicenses').get();
-                console.log('📋 Firebase fetch completed');
-
-                if (docSnap.exists) {
-                    const data = docSnap.data();
-                    console.log('📊 Full document data:', data);
-                    console.log('🔑 Type of licenses:', typeof data.licenses);
-                    console.log('🔑 licenses value:', data.licenses);
-
-                    if (data.licenses && typeof data.licenses === 'object') {
-                        LICENSES = {};
-                        for (let licenseKey in data.licenses) {
-                            LICENSES[licenseKey] = data.licenses[licenseKey].shopName;
-                            console.log(`   ✓ Added: ${licenseKey} → ${data.licenses[licenseKey].shopName}`);
-                        }
-                        console.log('✅ Licenses loaded successfully:', LICENSES);
-                    } else {
-                        console.error('❌ licenses is not a proper object:', data.licenses);
-                    }
-                } else {
-                    console.error('❌ Document credentials/shopLicenses DOES NOT EXIST in Firebase');
+                const snap = await withTimeout(FB.collection('credentials').doc('shopLicenses').get(), 15000);
+                const out = {};
+                if (snap.exists) {
+                    const lic = (snap.data() || {}).licenses || {};
+                    for (const k in lic) out[k] = { shopName: lic[k].shopName, status: lic[k].status };
                 }
-            } catch(err) {
-                console.error('❌ Error loading licenses:', err.message, err);
+                LICENSES = out;
+                LICENSES_STATE = 'ready';
+            } catch (e) {
+                console.error('Could not load licenses:', e.message);
+                LICENSES_STATE = 'error';
             }
         }
 
+        async function WAIT_LICENSES() {
+            for (let i = 0; i < 60 && !LICENSES_PROMISE && LICENSES_STATE === 'loading'; i++) {
+                await new Promise(r => setTimeout(r, 250));
+            }
+            if (LICENSES_PROMISE) await LICENSES_PROMISE;
+        }
 
-        let DB = {
-            shop: '',
-            cats: ['scoop', 'kulfi', 'shakes', 'mastani', 'family pack', 'golden series family pack'],
-            items: [
-                {id:1, name:'Vanilla', cat:'scoop', price:80, stock:50, icon:'🍦'},
-                {id:2, name:'Chocolate', cat:'scoop', price:80, stock:40, icon:'🍫'},
-                {id:3, name:'Strawberry', cat:'scoop', price:80, stock:35, icon:'🍓'},
-                {id:4, name:'Double Scoop', cat:'scoop', price:150, stock:999, icon:'🍦'},
-                {id:5, name:'Chips', cat:'scoop', price:20, stock:100, icon:'🥔'},
-                {id:6, name:'Sprinkles', cat:'scoop', price:15, stock:120, icon:'✨'},
-                {id:7, name:'Vanilla Shake', cat:'shakes', price:60, stock:40, icon:'☕'},
-                {id:8, name:'Mango Mastani', cat:'mastani', price:120, stock:30, icon:'🥭'}
-            ],
-            orders: [],
-            bills: [],
-            inventoryBills: [],
-            carts: [[],[],[],[],[]],
-            currentCart: 0,
-            currentCat: 'all',
-            period: 'today',
-            customYear: new Date().getFullYear()
-        };
-
-        let EDIT_ID = null, CURRENT_BILL = null, CHART_INSTANCE = null;
-
+        // ---------- login / logout ----------
         async function LOGIN() {
-            const shop = document.getElementById('shopInput').value.trim();
-            const key = document.getElementById('keyInput').value.trim();
-
-            console.log('🔐 === LOGIN ATTEMPT ===');
-            console.log('👤 Shop Name entered:', `"${shop}"`, `(length: ${shop.length})`);
-            console.log('🔑 License Key entered:', `"${key}"`, `(length: ${key.length})`);
-            console.log('📂 All loaded licenses:', LICENSES);
-            console.log('🔍 Is key in LICENSES?', key in LICENSES);
-
-            if (key in LICENSES) {
-                const storedShop = LICENSES[key];
-                console.log('✓ Key found! Stored shop:', `"${storedShop}"`, `(length: ${storedShop.length})`);
-                console.log('🔄 Exact match check:', shop === storedShop);
-                console.log('📋 Character comparison:');
-                console.log('   Entered:', JSON.stringify(shop));
-                console.log('   Stored: ', JSON.stringify(storedShop));
-            } else {
-                console.error('✗ Key NOT found in LICENSES');
-                console.log('   Available keys:', Object.keys(LICENSES));
-            }
-
-            if (LICENSES[key] === shop) {
-                console.log('✅ LOGIN SUCCESSFUL!');
-                DB.shop = shop;
-                document.getElementById('login').style.display = 'none';
-                document.getElementById('app').classList.add('show');
-                document.getElementById('shopName').textContent = shop;
-                await LOAD();
-                INIT_DATA_IF_EMPTY();
+            const btn = el('loginBtn');
+            const shop = el('shopInput').value.trim();
+            const key = el('keyInput').value.trim();
+            if (!shop || !key) { alert('Please enter shop name and license key'); return; }
+            btn.disabled = true; btn.textContent = 'Checking...';
+            try {
+                await WAIT_LICENSES();
+                if (LICENSES_STATE !== 'ready') {
+                    alert('Unable to reach the server. Check your internet connection and reload the page.');
+                    return;
+                }
+                const lic = Object.prototype.hasOwnProperty.call(LICENSES, key) ? LICENSES[key] : null;
+                if (!lic || lic.shopName !== shop || (lic.status && lic.status !== 'active')) {
+                    alert('Invalid credentials!');
+                    return;
+                }
+                SHOP = shop;
+                const ok = await LOAD();
+                if (!ok) { SHOP = ''; return; }
+                el('login').style.display = 'none';
+                el('app').classList.add('show');
+                el('shopName').textContent = shop;
+                BUILD_YEAR_SELECT();
+                SHOW_TAB('pos');
                 RENDER_ALL();
-            } else {
-                console.error('❌ LOGIN FAILED - Credentials do not match');
-                alert('Invalid credentials!');
-            }
-        }
-
-        function RENDER_ALL() {
-            RENDER_CATS();
-            RENDER_MENU();
-            RENDER_SLOTS();
-            RENDER_CART();
-            RENDER_CAT_TABLE();
-            RENDER_INV_TABLE();
-            UPDATE_CAT_SELECT();
-            RENDER_BILLS_TABLE();
-            RENDER_INV_BILLS();
-        }
-
-        // POS FUNCTIONS
-        function RENDER_CATS() {
-            let html = '<button class="' + (DB.currentCat === 'all' ? 'active' : '') + '" onclick="SET_CAT(\'all\')">All</button>';
-            for (let c of DB.cats) {
-                html += '<button class="' + (DB.currentCat === c ? 'active' : '') + '" onclick="SET_CAT(\'' + c + '\')">' + c + '</button>';
-            }
-            document.getElementById('catButtons').innerHTML = html;
-        }
-
-        function SET_CAT(c) {
-            DB.currentCat = c;
-            RENDER_MENU();
-            RENDER_CATS();
-        }
-
-        function RENDER_MENU() {
-            let items = DB.currentCat === 'all' ? DB.items : DB.items.filter(i => i.cat === DB.currentCat);
-            let html = '';
-            for (let i of items) {
-                html += '<div class="menu-item" onclick="ADD_ITEM(' + i.id + ')">' + i.icon + '<br>' + i.name + '<br>₹' + i.price + '</div>';
-            }
-            document.getElementById('menuItems').innerHTML = html;
-        }
-
-        function ADD_ITEM(id) {
-            let item = DB.items.find(i => i.id === id);
-            if (!item || item.stock <= 0) { alert('Out of stock'); return; }
-            let existing = DB.carts[DB.currentCart].find(i => i.id === id);
-            if (existing) existing.qty++;
-            else DB.carts[DB.currentCart].push({...item, qty: 1});
-            RENDER_CART();
-        }
-
-        function RENDER_CART() {
-            let cart = DB.carts[DB.currentCart];
-            let html = '';
-            for (let i of cart) {
-                html += '<div class="cart-item"><div>' + i.name + ' = ₹' + (i.price * i.qty) + '</div><div><button class="btn" onclick="UPDATE_QTY(' + i.id + ',-1)">−</button><span style="font-weight: 600; margin: 0 8px;">' + i.qty + '</span><button class="btn" onclick="UPDATE_QTY(' + i.id + ',1)">+</button><button class="btn btn-danger" onclick="REMOVE_ITEM(' + i.id + ')">✕</button></div></div>';
-            }
-            document.getElementById('cartDisplay').innerHTML = html || '<p style="color: #7f8c8d;">Empty</p>';
-            let total = cart.reduce((s, i) => s + i.price * i.qty, 0);
-            document.getElementById('cartTotal').textContent = '₹' + total;
-            RENDER_SLOTS();
-        }
-
-        function UPDATE_QTY(id, change) {
-            let item = DB.carts[DB.currentCart].find(i => i.id === id);
-            if (item) {
-                item.qty += change;
-                if (item.qty <= 0) DB.carts[DB.currentCart] = DB.carts[DB.currentCart].filter(i => i.id !== id);
-                RENDER_CART();
-            }
-        }
-
-        function REMOVE_ITEM(id) {
-            DB.carts[DB.currentCart] = DB.carts[DB.currentCart].filter(i => i.id !== id);
-            RENDER_CART();
-        }
-
-        function CLEAR_CART() {
-            DB.carts[DB.currentCart] = [];
-            RENDER_CART();
-        }
-
-        function RENDER_SLOTS() {
-            let html = '';
-            for (let i = 0; i < 5; i++) {
-                let count = DB.carts[i] ? DB.carts[i].length : 0;
-                html += '<button class="order-slot ' + (DB.currentCart === i ? 'active' : '') + '" onclick="SET_SLOT(' + i + ')">Order ' + (i+1) + '<br>(' + count + ')</button>';
-            }
-            document.getElementById('orderSlots').innerHTML = html;
-        }
-
-        function SET_SLOT(i) {
-            DB.currentCart = i;
-            RENDER_CART();
-        }
-
-        function CHECKOUT() {
-            let total = DB.carts[DB.currentCart].reduce((s, i) => s + i.price * i.qty, 0);
-            if (total === 0) { alert('Cart is empty'); return; }
-            document.getElementById('chkSub').textContent = total;
-            document.getElementById('chkTotal').textContent = total;
-            document.getElementById('chkDiscPct').value = 0;
-            document.getElementById('chkDiscFixed').value = 0;
-            document.getElementById('chkMethod').value = 'cash';
-            document.getElementById('chkCustomer').value = '';
-            document.getElementById('chkContact').value = '';
-            document.getElementById('chkCashReceived').value = '';
-            SWITCH_PAYMENT();
-            document.getElementById('checkoutModal').classList.add('show');
-        }
-
-        function SWITCH_DISCOUNT() {
-            let pct = document.querySelector('input[name="discType"][value="pct"]').checked;
-            document.getElementById('chkDiscPct').disabled = !pct;
-            document.getElementById('chkDiscFixed').disabled = pct;
-            UPDATE_CHECKOUT();
-        }
-
-        function SWITCH_PAYMENT() {
-            let method = document.getElementById('chkMethod').value;
-            document.getElementById('cashReceivedDiv').style.display = method === 'cash' ? 'block' : 'none';
-            document.getElementById('changeDiv').style.display = method === 'cash' ? 'block' : 'none';
-            document.getElementById('splitSection').style.display = method === 'split' ? 'block' : 'none';
-            UPDATE_CHECKOUT();
-        }
-
-        function UPDATE_CHECKOUT() {
-            let sub = DB.carts[DB.currentCart].reduce((s, i) => s + i.price * i.qty, 0);
-            let pct = document.querySelector('input[name="discType"][value="pct"]').checked;
-            let disc = pct ? sub * (parseFloat(document.getElementById('chkDiscPct').value) || 0) / 100 : parseFloat(document.getElementById('chkDiscFixed').value) || 0;
-            let total = Math.max(0, sub - disc);
-            document.getElementById('chkTotal').textContent = Math.round(total);
-        }
-
-        function CALCULATE_CHANGE() {
-            let total = parseFloat(document.getElementById('chkTotal').textContent) || 0;
-            let received = parseFloat(document.getElementById('chkCashReceived').value) || 0;
-            let change = Math.max(0, received - total);
-            document.getElementById('chkChange').textContent = Math.round(change);
-        }
-
-        function UPDATE_SPLIT() {
-            let total = parseFloat(document.getElementById('chkTotal').textContent) || 0;
-            let cash = parseFloat(document.getElementById('chkSplitCash').value) || 0;
-            let online = Math.max(0, total - cash);
-            document.getElementById('chkSplitOnline').value = Math.round(online);
-        }
-
-        function FINISH_CHECKOUT() {
-            let cart = DB.carts[DB.currentCart];
-            if (!cart || cart.length === 0) {
-                alert('Cart is empty!');
-                return;
-            }
-
-            let sub = cart.reduce((s, i) => s + i.price * i.qty, 0);
-            let pct = document.querySelector('input[name="discType"][value="pct"]').checked;
-            let disc = pct ? sub * (parseFloat(document.getElementById('chkDiscPct').value) || 0) / 100 : parseFloat(document.getElementById('chkDiscFixed').value) || 0;
-            let total = Math.max(0, sub - disc);
-            let method = document.getElementById('chkMethod').value;
-
-            // Deduct stock
-            for (let i of cart) {
-                let item = DB.items.find(x => x.id === i.id);
-                if (item) item.stock = Math.max(0, item.stock - i.qty);
-            }
-
-            let bill = {
-                id: 'ORD-' + Date.now(),
-                date: new Date().toISOString(),
-                items: JSON.parse(JSON.stringify(cart)),
-                subtotal: sub,
-                discount: disc,
-                total: total,
-                method: method,
-                customer: {
-                    name: document.getElementById('chkCustomer').value || '',
-                    contact: document.getElementById('chkContact').value || ''
-                }
-            };
-
-            if (method === 'cash') {
-                bill.cash = parseFloat(document.getElementById('chkCashReceived').value) || 0;
-                bill.change = bill.cash - total;
-            } else if (method === 'split') {
-                bill.cash = parseFloat(document.getElementById('chkSplitCash').value) || 0;
-                bill.online = parseFloat(document.getElementById('chkSplitOnline').value) || 0;
-            } else {
-                bill.online = total;
-            }
-
-            DB.orders.push(bill);
-            DB.bills.push(bill);
-
-            SAVE();
-
-            // Close modal first
-            document.getElementById('checkoutModal').classList.remove('show');
-
-            // Then update everything
-            DB.carts[DB.currentCart] = [];
-            RENDER_CART();
-            RENDER_SLOTS();
-            RENDER_INV_TABLE();
-            RENDER_BILLS_TABLE();
-            RENDER_CATS();
-
-            alert('✅ Order ' + bill.id + ' complete!');
-        }
-
-        // ADMIN FUNCTIONS
-        function RENDER_CAT_TABLE() {
-            if (!DB.cats || DB.cats.length === 0) {
-                document.getElementById('catTable').innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #7f8c8d;">No categories yet</td></tr>';
-                return;
-            }
-            if (!DB.items) DB.items = [];
-            let html = '<tr><th>Category</th><th>Items</th><th>Action</th></tr>';
-            for (let c of DB.cats) {
-                let count = DB.items.filter(i => i.cat === c).length;
-                html += '<tr><td>' + c + '</td><td>' + count + '</td><td><button class="btn" onclick="EDIT_CAT(\'' + c + '\')">Edit</button><button class="btn btn-danger" onclick="DEL_CAT(\'' + c + '\')">Delete</button></td></tr>';
-            }
-            document.getElementById('catTable').innerHTML = html;
-        }
-
-        function RENDER_INV_TABLE() {
-            if (!DB.items || DB.items.length === 0) {
-                document.getElementById('invTable').innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #7f8c8d;">No items yet</td></tr>';
-                return;
-            }
-            let html = '<tr><th>Item</th><th>Price</th><th>Stock</th><th>Action</th></tr>';
-            for (let i of DB.items) {
-                html += '<tr><td>' + i.icon + ' ' + i.name + '</td><td>₹' + i.price + '</td><td>' + i.stock + '</td><td><button class="btn" onclick="EDIT_ITEM(' + i.id + ')">Edit</button><button class="btn btn-danger" onclick="DEL_ITEM(' + i.id + ')">Delete</button></td></tr>';
-            }
-            document.getElementById('invTable').innerHTML = html;
-        }
-
-        let EDIT_CAT_NAME = null;
-
-        function ADD_CAT_MODAL() {
-            EDIT_CAT_NAME = null;
-            document.getElementById('catModalTitle').textContent = 'Add Category';
-            document.getElementById('catModalName').value = '';
-            document.getElementById('catModalName').disabled = false;
-            document.getElementById('catModalItems').innerHTML = '<p style="color: #7f8c8d; font-size: 12px;">Items will appear here after creating category</p>';
-            document.getElementById('catModal').classList.add('show');
-        }
-
-        function EDIT_CAT(c) {
-            EDIT_CAT_NAME = c;
-            document.getElementById('catModalTitle').textContent = 'Edit Category: ' + c;
-            document.getElementById('catModalName').value = c;
-            document.getElementById('catModalName').disabled = true;
-            RENDER_CAT_ITEMS();
-            document.getElementById('catModal').classList.add('show');
-        }
-
-        function RENDER_CAT_ITEMS() {
-            if (!DB.items) DB.items = [];
-            let items = DB.items.filter(i => i.cat === EDIT_CAT_NAME);
-            let html = '';
-            if (items.length === 0) {
-                html = '<p style="color: #7f8c8d; font-size: 12px;">No items in this category</p>';
-            } else {
-                html = items.map(i => '<div style="padding: 8px; background: white; margin-bottom: 6px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 12px;"><strong>' + i.name + '</strong> - ₹' + i.price + ' (Stock: ' + i.stock + ')</span><button class="btn" style="padding: 4px 8px; font-size: 10px;" onclick="EDIT_ITEM(' + i.id + ')">Edit</button></div>').join('');
-            }
-            document.getElementById('catModalItems').innerHTML = html;
-        }
-
-        function ADD_ITEM_TO_CAT() {
-            if (!EDIT_CAT_NAME) {
-                alert('Save category first');
-                return;
-            }
-            EDIT_ID = null;
-            document.getElementById('itemModalTitle').textContent = 'Add Item to ' + EDIT_CAT_NAME;
-            document.getElementById('itemModalName').value = '';
-            document.getElementById('itemModalCat').value = EDIT_CAT_NAME;
-            document.getElementById('itemModalPrice').value = '';
-            document.getElementById('itemModalStock').value = '';
-            CLOSE_MODAL('catModal');
-            document.getElementById('itemModal').classList.add('show');
-        }
-
-        function SAVE_CAT() {
-            try {
-                let name = document.getElementById('catModalName').value.toLowerCase().trim();
-                if (!name) {
-                    alert('⚠️ Category name cannot be empty');
-                    return;
-                }
-
-                if (EDIT_CAT_NAME) {
-                    if (name !== EDIT_CAT_NAME && DB.cats.includes(name)) {
-                        alert('⚠️ Category already exists');
-                        return;
-                    }
-                    DB.cats = DB.cats.map(c => c === EDIT_CAT_NAME ? name : c);
-                    DB.items.forEach(i => { if (i.cat === EDIT_CAT_NAME) i.cat = name; });
-                } else {
-                    if (DB.cats.includes(name)) {
-                        alert('⚠️ Category already exists');
-                        return;
-                    }
-                    DB.cats.push(name);
-                }
-
-                console.log('💾 Saving category:', name, 'All cats:', DB.cats);
-                SAVE();
-                RENDER_ALL();
-                alert('✅ Category saved successfully!');
-                CLOSE_MODAL('catModal');
-            } catch(e) {
-                console.error('❌ Error saving category:', e.message);
-                alert('❌ Error: ' + e.message);
-            }
-        }
-
-        function DEL_CAT(c) {
-            if (DB.items.some(i => i.cat === c)) { alert('Category has items. Delete items first'); return; }
-            DB.cats = DB.cats.filter(x => x !== c);
-            SAVE();
-            RENDER_ALL();
-        }
-
-        function ADD_ITEM_MODAL() {
-            if (DB.cats.length === 0) {
-                alert('⚠️ Create a category first!');
-                return;
-            }
-            EDIT_ID = null;
-            document.getElementById('itemModalTitle').textContent = 'Add Item';
-            document.getElementById('itemModalName').value = '';
-            document.getElementById('itemModalCat').value = DB.cats[0];
-            document.getElementById('itemModalPrice').value = '';
-            document.getElementById('itemModalStock').value = '';
-            document.getElementById('itemModal').classList.add('show');
-        }
-
-        function EDIT_ITEM(id) {
-            let item = DB.items.find(i => i.id === id);
-            if (!item) return;
-            EDIT_ID = id;
-            document.getElementById('itemModalTitle').textContent = 'Edit Item';
-            document.getElementById('itemModalName').value = item.name;
-            document.getElementById('itemModalCat').value = item.cat;
-            document.getElementById('itemModalPrice').value = item.price;
-            document.getElementById('itemModalStock').value = item.stock;
-            document.getElementById('itemModal').classList.add('show');
-        }
-
-        function SAVE_ITEM() {
-            try {
-                let name = document.getElementById('itemModalName').value.trim();
-                let cat = document.getElementById('itemModalCat').value;
-                let price = parseInt(document.getElementById('itemModalPrice').value);
-                let stock = parseInt(document.getElementById('itemModalStock').value);
-
-                if (!name) {
-                    alert('⚠️ Item name is required');
-                    return;
-                }
-                if (!cat) {
-                    alert('⚠️ Category is required');
-                    return;
-                }
-                if (isNaN(price) || price < 0) {
-                    alert('⚠️ Price must be a valid positive number');
-                    return;
-                }
-                if (isNaN(stock) || stock < 0) {
-                    alert('⚠️ Stock must be a valid number');
-                    return;
-                }
-
-                if (EDIT_ID) {
-                    let item = DB.items.find(i => i.id === EDIT_ID);
-                    if (item) {
-                        item.name = name;
-                        item.cat = cat;
-                        item.price = price;
-                        item.stock = stock;
-                    }
-                } else {
-                    let newId = Math.max(...DB.items.map(i => i.id), 0) + 1;
-                    DB.items.push({id: newId, name: name, cat: cat, price: price, stock: stock, icon: '📦'});
-                }
-
-                console.log('💾 Saving item:', name, 'to category:', cat);
-                SAVE();
-                RENDER_ALL();
-                alert('✅ Item saved successfully!');
-                CLOSE_MODAL('itemModal');
-            } catch(e) {
-                console.error('❌ Error saving item:', e.message);
-                alert('❌ Error: ' + e.message);
-            }
-        }
-
-        function DEL_ITEM(id) {
-            DB.items = DB.items.filter(i => i.id !== id);
-            SAVE();
-            RENDER_ALL();
-        }
-
-        function UPDATE_CAT_SELECT() {
-            let html = '';
-            for (let c of DB.cats) {
-                html += '<option value="' + c + '">' + c + '</option>';
-            }
-            document.getElementById('itemModalCat').innerHTML = html;
-        }
-
-        function CLEAR_ALL_DATA() {
-            if (confirm('🚨 WARNING: This will DELETE all orders and bills!\n\nAre you sure? (Testing only)')) {
-                DB.orders = [];
-                DB.bills = [];
-                DB.inventoryBills = [];
-                DB.carts = [[],[],[],[],[]];
-                DB.currentCart = 0;
-                SAVE();
-                RENDER_ALL();
-                alert('✅ All data cleared!');
-            }
-        }
-
-        // TAB MANAGEMENT
-        function SHOW_TAB(tab) {
-            document.querySelectorAll('.section').forEach(s => s.classList.remove('show'));
-            document.getElementById(tab).classList.add('show');
-            document.querySelectorAll('.header-right button').forEach(b => b.classList.remove('active'));
-            event.target.classList.add('active');
-            if (tab === 'reports') RENDER_REPORTS();
-            if (tab === 'bills') RENDER_BILLS_TABLE();
-        }
-
-        // REPORTS
-        function REPORT_PERIOD(p) {
-            DB.period = p;
-            document.querySelectorAll('.period-buttons button').forEach(b => b.classList.remove('active'));
-            event.target.classList.add('active');
-            if (p === 'custom') {
-                document.getElementById('customYearSection').style.display = 'block';
-            } else {
-                document.getElementById('customYearSection').style.display = 'none';
-            }
-            RENDER_REPORTS();
-        }
-
-        function RENDER_REPORTS() {
-            let now = new Date();
-            let filtered = DB.orders.filter(o => {
-                let d = new Date(o.date);
-                if (DB.period === 'today') return d.toDateString() === now.toDateString();
-                if (DB.period === 'weekly') return d >= new Date(now - 7*24*60*60*1000);
-                if (DB.period === 'monthly') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-                if (DB.period === 'yearly') return d.getFullYear() === now.getFullYear();
-                if (DB.period === 'custom') {
-                    let year = parseInt(document.getElementById('customYearSelect').value);
-                    return d.getFullYear() === year;
-                }
-                return true;
-            });
-
-            let sales = filtered.reduce((s, o) => s + o.total, 0);
-            let cash = 0, online = 0;
-            for (let o of filtered) {
-                if (o.method === 'cash') {
-                    cash += (o.cash || o.total);
-                } else if (o.method === 'online') {
-                    online += (o.online || o.total);
-                } else if (o.method === 'split') {
-                    cash += (o.cash || 0);
-                    online += (o.online || 0);
-                }
-            }
-
-            document.getElementById('rptSales').textContent = Math.round(sales);
-            document.getElementById('rptOrders').textContent = filtered.length;
-            document.getElementById('rptCash').textContent = Math.round(cash);
-            document.getElementById('rptOnline').textContent = Math.round(online);
-
-            // Chart
-            let monthlyData = [0,0,0,0,0,0,0,0,0,0,0,0];
-            let chartOrders = DB.orders;
-
-            if (DB.period === 'custom') {
-                let selectedYear = parseInt(document.getElementById('customYearSelect').value);
-                chartOrders = DB.orders.filter(o => new Date(o.date).getFullYear() === selectedYear);
-            } else {
-                let currentYear = now.getFullYear();
-                chartOrders = DB.orders.filter(o => new Date(o.date).getFullYear() === currentYear);
-            }
-
-            chartOrders.forEach(o => {
-                let d = new Date(o.date);
-                monthlyData[d.getMonth()] += o.total;
-            });
-
-            if (CHART_INSTANCE) CHART_INSTANCE.destroy();
-            let ctx = document.getElementById('salesChart').getContext('2d');
-            CHART_INSTANCE = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-                    datasets: [{
-                        label: 'Monthly Sales',
-                        data: monthlyData,
-                        backgroundColor: 'rgba(102, 126, 234, 0.7)',
-                        borderColor: '#667eea',
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: true } }
-                }
-            });
-
-            // Breakdown
-            let html = '';
-            if (DB.period === 'today') {
-                html = '<table style="width: 100%; font-size: 12px;"><tr><th>Time</th><th>Items</th><th>Amount</th><th>Payment</th><th>Customer</th></tr>';
-                for (let o of filtered) {
-                    html += '<tr><td>' + new Date(o.date).toLocaleTimeString() + '</td><td>' + o.items.map(i => i.name).join(', ') + '</td><td>₹' + Math.round(o.total) + '</td><td>' + o.method + '</td><td>' + (o.customer.name || '—') + '</td></tr>';
-                }
-                html += '</table>';
-            } else if (DB.period === 'weekly') {
-                let daysMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let key = d.toDateString();
-                    if (!daysMap[key]) daysMap[key] = { date: d, total: 0, cash: 0, online: 0, count: 0 };
-                    daysMap[key].total += o.total;
-                    daysMap[key].count++;
-                    if (o.method === 'cash') daysMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') daysMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        daysMap[key].cash += o.cash || 0;
-                        daysMap[key].online += o.online || 0;
-                    }
-                });
-                for (let key in daysMap) {
-                    let d = daysMap[key];
-                    html += '<div class="breakdown-item"><div><strong>Date</strong><br>' + d.date.toLocaleDateString() + '</div><div><strong>Sale</strong><br>₹' + Math.round(d.total) + '</div><div><strong>Cash</strong><br>₹' + Math.round(d.cash) + '</div><div><strong>Online</strong><br>₹' + Math.round(d.online) + '</div><div><strong>Orders</strong><br>' + d.count + '</div></div>';
-                }
-            } else if (DB.period === 'monthly') {
-                let weeksMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let week = Math.ceil(d.getDate() / 7);
-                    let key = 'Week ' + week;
-                    if (!weeksMap[key]) weeksMap[key] = { total: 0, cash: 0, online: 0, count: 0 };
-                    weeksMap[key].total += o.total;
-                    weeksMap[key].count++;
-                    if (o.method === 'cash') weeksMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') weeksMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        weeksMap[key].cash += o.cash || 0;
-                        weeksMap[key].online += o.online || 0;
-                    }
-                });
-                for (let key in weeksMap) {
-                    let w = weeksMap[key];
-                    html += '<div class="breakdown-item"><div><strong>Week</strong><br>' + key + '</div><div><strong>Sale</strong><br>₹' + Math.round(w.total) + '</div><div><strong>Cash</strong><br>₹' + Math.round(w.cash) + '</div><div><strong>Online</strong><br>₹' + Math.round(w.online) + '</div><div><strong>Orders</strong><br>' + w.count + '</div></div>';
-                }
-            } else {
-                let monthsMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let month = d.getMonth();
-                    let key = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month];
-                    if (!monthsMap[key]) monthsMap[key] = { total: 0, cash: 0, online: 0, count: 0 };
-                    monthsMap[key].total += o.total;
-                    monthsMap[key].count++;
-                    if (o.method === 'cash') monthsMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') monthsMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        monthsMap[key].cash += o.cash || 0;
-                        monthsMap[key].online += o.online || 0;
-                    }
-                });
-                for (let key in monthsMap) {
-                    let m = monthsMap[key];
-                    html += '<div class="breakdown-item"><div><strong>Month</strong><br>' + key + '</div><div><strong>Sale</strong><br>₹' + Math.round(m.total) + '</div><div><strong>Cash</strong><br>₹' + Math.round(m.cash) + '</div><div><strong>Online</strong><br>₹' + Math.round(m.online) + '</div><div><strong>Orders</strong><br>' + m.count + '</div></div>';
-                }
-            }
-
-            document.getElementById('rptDetails').innerHTML = html;
-        }
-
-        function EXPORT_EXCEL() {
-            let now = new Date();
-            let filtered = DB.orders.filter(o => {
-                let d = new Date(o.date);
-                if (DB.period === 'today') return d.toDateString() === now.toDateString();
-                if (DB.period === 'weekly') return d >= new Date(now - 7*24*60*60*1000);
-                if (DB.period === 'monthly') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-                if (DB.period === 'yearly') return d.getFullYear() === now.getFullYear();
-                if (DB.period === 'custom') {
-                    let year = parseInt(document.getElementById('customYearSelect').value);
-                    return d.getFullYear() === year;
-                }
-                return true;
-            });
-
-            let csv = '';
-
-            if (DB.period === 'today') {
-                csv = 'Order ID,DateTime,Items,Subtotal,Discount,Total,Payment Method,Cash,Online,Customer Name,Customer Contact\n';
-                filtered.forEach(o => {
-                    let items = o.items.map(i => i.name + ' x' + i.qty).join('; ');
-                    csv += '"' + o.id + '","' + new Date(o.date).toLocaleString() + '","' + items + '",' + o.subtotal + ',' + o.discount + ',' + o.total + ',"' + o.method + '",' + (o.cash || '') + ',' + (o.online || '') + ',"' + (o.customer.name || '') + '","' + (o.customer.contact || '') + '"\n';
-                });
-            } else if (DB.period === 'weekly') {
-                let daysMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let key = d.toDateString();
-                    if (!daysMap[key]) daysMap[key] = { date: d, total: 0, cash: 0, online: 0, count: 0 };
-                    daysMap[key].total += o.total;
-                    daysMap[key].count++;
-                    if (o.method === 'cash') daysMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') daysMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        daysMap[key].cash += o.cash || 0;
-                        daysMap[key].online += o.online || 0;
-                    }
-                });
-                csv = 'Date,Total Sale,Cash,Online,Orders\n';
-                for (let key in daysMap) {
-                    let d = daysMap[key];
-                    csv += d.date.toLocaleDateString() + ',' + d.total + ',' + d.cash + ',' + d.online + ',' + d.count + '\n';
-                }
-            } else if (DB.period === 'monthly') {
-                let currentMonth = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getMonth()];
-                let currentYear = now.getFullYear();
-                let weeksMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let week = Math.ceil(d.getDate() / 7);
-                    let key = 'Week ' + week;
-                    if (!weeksMap[key]) weeksMap[key] = { total: 0, cash: 0, online: 0, count: 0 };
-                    weeksMap[key].total += o.total;
-                    weeksMap[key].count++;
-                    if (o.method === 'cash') weeksMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') weeksMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        weeksMap[key].cash += o.cash || 0;
-                        weeksMap[key].online += o.online || 0;
-                    }
-                });
-                csv = 'Month,Week,Total Sale,Cash,Online,Orders\n';
-                for (let key in weeksMap) {
-                    let w = weeksMap[key];
-                    csv += currentMonth + ',' + key + ',' + w.total + ',' + w.cash + ',' + w.online + ',' + w.count + '\n';
-                }
-            } else if (DB.period === 'yearly') {
-                let currentYear = now.getFullYear();
-                let monthsMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let month = d.getMonth();
-                    let key = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month];
-                    if (!monthsMap[key]) monthsMap[key] = { total: 0, cash: 0, online: 0, count: 0 };
-                    monthsMap[key].total += o.total;
-                    monthsMap[key].count++;
-                    if (o.method === 'cash') monthsMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') monthsMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        monthsMap[key].cash += o.cash || 0;
-                        monthsMap[key].online += o.online || 0;
-                    }
-                });
-                csv = 'Month,Year,Total Sale,Cash,Online,Orders\n';
-                for (let key in monthsMap) {
-                    let m = monthsMap[key];
-                    csv += key + ',' + currentYear + ',' + m.total + ',' + m.cash + ',' + m.online + ',' + m.count + '\n';
-                }
-            } else if (DB.period === 'custom') {
-                let selectedYear = parseInt(document.getElementById('customYearSelect').value);
-                let monthsMap = {};
-                filtered.forEach(o => {
-                    let d = new Date(o.date);
-                    let month = d.getMonth();
-                    let key = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month];
-                    if (!monthsMap[key]) monthsMap[key] = { total: 0, cash: 0, online: 0, count: 0 };
-                    monthsMap[key].total += o.total;
-                    monthsMap[key].count++;
-                    if (o.method === 'cash') monthsMap[key].cash += o.cash || o.total;
-                    else if (o.method === 'online') monthsMap[key].online += o.online || o.total;
-                    else if (o.method === 'split') {
-                        monthsMap[key].cash += o.cash || 0;
-                        monthsMap[key].online += o.online || 0;
-                    }
-                });
-                csv = 'Month,Year,Total Sale,Cash,Online,Orders\n';
-                for (let key in monthsMap) {
-                    let m = monthsMap[key];
-                    csv += key + ',' + selectedYear + ',' + m.total + ',' + m.cash + ',' + m.online + ',' + m.count + '\n';
-                }
-            }
-
-            let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            let link = document.createElement('a');
-            let url = URL.createObjectURL(blob);
-            link.href = url;
-            let period = DB.period === 'custom' ? 'custom_' + document.getElementById('customYearSelect').value : DB.period;
-            link.download = 'sales_' + period + '_' + new Date().toISOString().split('T')[0] + '.csv';
-            link.click();
-            URL.revokeObjectURL(url);
-        }
-
-        // BILLS
-        function RENDER_BILLS_TABLE() {
-            if (!DB.bills || DB.bills.length === 0) {
-                document.getElementById('billsTable').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #7f8c8d;">No bills yet. Complete an order to generate a bill.</td></tr>';
-                return;
-            }
-
-            let dateFilter = document.getElementById('billsDateFilter').value;
-            let filtered = DB.bills;
-
-            if (dateFilter) {
-                let filterDate = new Date(dateFilter).toDateString();
-                filtered = DB.bills.filter(b => new Date(b.date).toDateString() === filterDate);
-            }
-
-            if (filtered.length === 0) {
-                document.getElementById('billsTable').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #7f8c8d;">No bills for selected date.</td></tr>';
-                return;
-            }
-
-            let html = '<tr><th>Order ID</th><th>Date</th><th>Amount</th><th>Customer</th><th>Contact</th><th>Action</th></tr>';
-            for (let b of filtered) {
-                let name = b.customer && b.customer.name ? b.customer.name : '—';
-                let contact = b.customer && b.customer.contact ? b.customer.contact : '—';
-                html += '<tr><td>' + b.id + '</td><td>' + new Date(b.date).toLocaleDateString() + '</td><td>₹' + Math.round(b.total) + '</td><td>' + name + '</td><td>' + contact + '</td><td><button class="btn" onclick="VIEW_BILL(\'' + b.id + '\')">View</button><button class="btn btn-success" onclick="DOWNLOAD_PDF(\'' + b.id + '\')">PDF</button></td></tr>';
-            }
-            document.getElementById('billsTable').innerHTML = html;
-        }
-
-        function CLEAR_DATE_FILTER() {
-            document.getElementById('billsDateFilter').value = '';
-            RENDER_BILLS_TABLE();
-        }
-
-        function VIEW_BILL(id) {
-            let bill = DB.bills.find(b => b.id === id);
-            if (!bill) return;
-            CURRENT_BILL = bill;
-
-            let html = `<div style="background: white; padding: 20px; border-radius: 8px; font-family: monospace; font-size: 13px;">
-                <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #667eea; padding-bottom: 15px;">
-                    <h3 style="margin: 0 0 5px 0; font-size: 16px;">${DB.shop}</h3>
-                    <p style="margin: 0; font-size: 11px;">${new Date(bill.date).toLocaleString()}</p>
-                    <p style="margin: 0; font-size: 10px;">Order: ${bill.id}</p>
-                </div>
-                <div style="margin-bottom: 15px;">
-                    <div style="font-weight: bold; margin-bottom: 10px;">Items:</div>
-                    ${bill.items.map(i => `<div style="display: flex; justify-content: space-between;"><span>${i.name} x${i.qty}</span><span>₹${i.price * i.qty}</span></div>`).join('')}
-                </div>
-                <div style="border-top: 2px solid #667eea; padding-top: 10px;">
-                    <div style="display: flex; justify-content: space-between;"><span>Subtotal</span><span>₹${Math.round(bill.subtotal)}</span></div>
-                    ${bill.discount > 0 ? `<div style="display: flex; justify-content: space-between;"><span>Discount</span><span>-₹${Math.round(bill.discount)}</span></div>` : ''}
-                    <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px;"><span>Total</span><span>₹${Math.round(bill.total)}</span></div>
-                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e1e8ed;">
-                        <p style="margin: 3px 0;"><strong>Method:</strong> ${bill.method}</p>
-                        ${bill.cash ? `<p style="margin: 3px 0;"><strong>Cash:</strong> ₹${Math.round(bill.cash)}</p>` : ''}
-                        ${bill.online ? `<p style="margin: 3px 0;"><strong>Online:</strong> ₹${Math.round(bill.online)}</p>` : ''}
-                        ${bill.change ? `<p style="margin: 3px 0;"><strong>Change:</strong> ₹${Math.round(bill.change)}</p>` : ''}
-                        ${bill.customer.name || bill.customer.contact ? `<p style="margin-top: 5px;"><strong>Customer:</strong> ${bill.customer.name || '—'} ${bill.customer.contact ? '/ ' + bill.customer.contact : ''}</p>` : ''}
-                    </div>
-                </div>
-            </div>`;
-
-            document.getElementById('billContent').innerHTML = html;
-            document.getElementById('billViewModal').classList.add('show');
-        }
-
-        function DOWNLOAD_PDF(id) {
-            let bill = DB.bills.find(b => b.id === id);
-            if (!bill) return;
-            let element = document.getElementById('billContent');
-            let opt = {
-                margin: 5,
-                filename: `bill-${bill.id}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2 },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-            html2pdf().set(opt).from(element).save();
-        }
-
-        function DOWNLOAD_BILL() {
-            if (CURRENT_BILL) DOWNLOAD_PDF(CURRENT_BILL.id);
-        }
-
-        // INVENTORY BILLS
-        function UPLOAD_INVENTORY_BILL(event) {
-            let fileInput = document.getElementById('invFileInput');
-            let file = fileInput.files[0];
-            if (!file) return;
-            if (file.size > 2 * 1024 * 1024) {
-                alert('⚠️ File too large! Max 2MB');
-                fileInput.value = '';
-                return;
-            }
-            let reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    let bill = {
-                        id: 'INV-' + Date.now(),
-                        date: new Date().toISOString(),
-                        fileName: file.name,
-                        fileType: file.type,
-                        fileSize: file.size,
-                        fileData: e.target.result
-                    };
-                    DB.inventoryBills.push(bill);
-                    SAVE();
-                    RENDER_INV_BILLS();
-                    fileInput.value = '';
-                    alert('✅ File uploaded!');
-                } catch(err) {
-                    alert('❌ Error: ' + err.message);
-                    fileInput.value = '';
-                }
-            };
-            reader.readAsDataURL(file);
-        }
-
-        function RENDER_INV_BILLS() {
-            if (!DB.inventoryBills) DB.inventoryBills = [];
-            if (DB.inventoryBills.length === 0) {
-                document.getElementById('inventoryBillsTable').innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #7f8c8d;">No bills uploaded yet</td></tr>';
-                return;
-            }
-            let html = '<tr><th>ID</th><th>Date</th><th>File Name</th><th>Action</th></tr>';
-            for (let b of DB.inventoryBills) {
-                if (b && b.id) {
-                    html += '<tr><td>' + b.id + '</td><td>' + new Date(b.date).toLocaleDateString() + '</td><td>' + b.fileName + '</td><td><button class="btn btn-success" onclick="DOWNLOAD_INV_BILL(\'' + b.id + '\')">Download</button><button class="btn btn-danger" onclick="DEL_INV_BILL(\'' + b.id + '\')">Delete</button></td></tr>';
-                }
-            }
-            document.getElementById('inventoryBillsTable').innerHTML = html;
-        }
-
-        function DOWNLOAD_INV_BILL(id) {
-            let bill = DB.inventoryBills.find(b => b.id === id);
-            if (!bill) return;
-            let link = document.createElement('a');
-            link.href = bill.fileData;
-            link.download = bill.fileName;
-            link.click();
-        }
-
-        function DEL_INV_BILL(id) {
-            if (confirm('Delete this bill?')) {
-                DB.inventoryBills = DB.inventoryBills.filter(b => b.id !== id);
-                SAVE();
-                RENDER_INV_BILLS();
-            }
-        }
-
-        // MODALS
-        function CLOSE_MODAL(id) {
-            document.getElementById(id).classList.remove('show');
-        }
-
-        // PERSISTENCE
-        async function SAVE_TO_FIREBASE() {
-            if (!FIRESTORE_READY || !FB) {
-                console.log('⚠️ Firebase not ready, skipping cloud save');
-                return true;
-            }
-            try {
-                console.log('📡 Saving to Firebase...', DB.shop);
-                await FB.collection('shops').doc(DB.shop).set({
-                    lastUpdated: new Date().toISOString(),
-                    data: DB
-                }, { merge: false });
-                console.log('✅ Firebase save successful');
-                return true;
-            } catch(e) {
-                console.error('❌ Firebase save error:', e.message);
-                return false;
-            }
-        }
-
-        async function LOAD_FROM_FIREBASE() {
-            if (!FIRESTORE_READY || !FB) return false;
-            try {
-                let doc = await FB.collection('shops').doc(DB.shop).get();
-                if (doc.exists) {
-                    DB = doc.data().data;
-                    return true;
-                }
-            } catch(e) {
-                console.error('Firebase error:', e);
-            }
-            return false;
-        }
-
-        function SAVE() {
-            try {
-                localStorage.setItem('iceflow_prod_' + DB.shop, JSON.stringify(DB));
-                console.log('✅ Saved to localStorage');
-                if (FIRESTORE_READY && FB) {
-                    SAVE_TO_FIREBASE().catch(err => console.error('Firebase error:', err));
-                }
-            } catch(e) {
-                console.error('❌ Save error:', e.message);
-            }
-        }
-
-        async function LOAD() {
-            if (FIRESTORE_READY) {
-                if (await LOAD_FROM_FIREBASE()) return;
-            }
-            let data = localStorage.getItem('iceflow_prod_' + DB.shop);
-            if (data) DB = JSON.parse(data);
-        }
-
-        function INIT_DATA_IF_EMPTY() {
-            console.log('🔧 Checking if data needs initialization...');
-
-            // Ensure all required fields exist
-            if (!DB.items) DB.items = [];
-            if (!DB.cats) DB.cats = ['ice-cream', 'toppings', 'combos', 'beverages', 'shakes', 'mastani'];
-            if (!DB.orders) DB.orders = [];
-            if (!DB.bills) DB.bills = [];
-            if (!DB.inventoryBills) DB.inventoryBills = [];
-            if (!DB.carts) DB.carts = [[],[],[],[],[]];
-            if (DB.currentCart === undefined) DB.currentCart = 0;
-            if (!DB.currentCat) DB.currentCat = 'all';
-            if (!DB.period) DB.period = 'today';
-            if (DB.customYear === undefined) DB.customYear = new Date().getFullYear();
-
-            console.log('   Items count:', DB.items.length);
-            console.log('   Orders count:', DB.orders.length);
-
-            if (DB.items.length === 0) {
-                console.log('📝 No items found - initializing with default items');
-                DB.items = [
-                    {id:1, name:'Vanilla', cat:'ice-cream', price:80, stock:50, icon:'🍦'},
-                    {id:2, name:'Chocolate', cat:'ice-cream', price:80, stock:40, icon:'🍫'},
-                    {id:3, name:'Strawberry', cat:'ice-cream', price:80, stock:35, icon:'🍓'},
-                    {id:4, name:'Double Scoop', cat:'combos', price:150, stock:999, icon:'🍦'},
-                    {id:5, name:'Chips', cat:'toppings', price:20, stock:100, icon:'🥔'},
-                    {id:6, name:'Sprinkles', cat:'toppings', price:15, stock:120, icon:'✨'},
-                    {id:7, name:'Vanilla Shake', cat:'shakes', price:60, stock:40, icon:'☕'},
-                    {id:8, name:'Mango Mastani', cat:'mastani', price:120, stock:30, icon:'🥭'}
-                ];
-                SAVE();
-                console.log('✅ Default items initialized and saved');
+            } finally {
+                btn.disabled = false; btn.textContent = 'Login';
             }
         }
 
         function LOGOUT() {
-            document.getElementById('app').classList.remove('show');
-            document.getElementById('login').style.display = 'flex';
-            document.getElementById('shopInput').value = '';
-            document.getElementById('keyInput').value = '';
-            DB = {shop:'', cats:['ice-cream','toppings','combos','beverages','shakes','mastani'], items:[], orders:[], bills:[], inventoryBills:[], carts:[[],[],[],[],[]], currentCart:0, currentCat:'all', period:'today', customYear:new Date().getFullYear()};
+            document.querySelectorAll('.modal').forEach(m => m.classList.remove('show'));
+            el('app').classList.remove('show');
+            el('login').style.display = 'flex';
+            el('shopInput').value = '';
+            el('keyInput').value = '';
+            DB = newDB();
+            SHOP = '';
+            CLOUD_LOADED = false;
+            if (CHART_INSTANCE) { CHART_INSTANCE.destroy(); CHART_INSTANCE = null; }
         }
+
+        // ---------- persistence ----------
+        function cacheKey() { return 'iceflow_prod_' + SHOP; }
+
+        function CACHE_LOCAL() {
+            try {
+                localStorage.setItem(cacheKey(), JSON.stringify({
+                    cats: DB.cats, items: DB.items, orders: DB.orders,
+                    inventoryBills: DB.inventoryBills.map(b => ({ ...b, fileData: undefined }))
+                }));
+            } catch (e) { console.warn('Local cache not saved:', e.message); }
+        }
+
+        async function FETCH_CLOUD() {
+            const ref = FB.collection('shops').doc(SHOP);
+            const [meta, ords, invs] = await withTimeout(Promise.all([
+                ref.get(), ref.collection('orders').get(), ref.collection('inventoryBills').get()
+            ]), 20000);
+            const d = meta.exists ? ((meta.data() || {}).data || {}) : {};
+            return {
+                cats: Array.isArray(d.cats) ? d.cats : [],
+                items: Array.isArray(d.items) ? d.items : [],
+                orders: ords.docs.map(x => x.data()).sort((a, b) => new Date(a.date) - new Date(b.date)),
+                inventoryBills: invs.docs.map(x => x.data()).sort((a, b) => new Date(a.date) - new Date(b.date))
+            };
+        }
+
+        function NORMALIZE() {
+            DB.cats = (DB.cats || []).filter(c => typeof c === 'string');
+            DB.items = (DB.items || []).filter(i => i && i.id != null);
+            DB.orders = (DB.orders || []).map(o => {
+                o.items = Array.isArray(o.items) ? o.items : [];
+                o.customer = o.customer || { name: '', contact: '' };
+                o.total = Number(o.total) || 0;
+                o.subtotal = Number(o.subtotal) || 0;
+                o.discount = Number(o.discount) || 0;
+                return o;
+            });
+            DB.inventoryBills = DB.inventoryBills || [];
+        }
+
+        // returns false if the user declined to continue
+        async function LOAD() {
+            DB = newDB();
+            try {
+                const c = await FETCH_CLOUD();
+                DB.cats = c.cats; DB.items = c.items; DB.orders = c.orders; DB.inventoryBills = c.inventoryBills;
+                CLOUD_LOADED = true;
+                SET_SYNC('ok');
+            } catch (e) {
+                console.error('Cloud load failed:', e.message);
+                CLOUD_LOADED = false;
+                if (!confirm('Cannot reach the cloud database.\n\nContinue in OFFLINE mode? Changes will be saved only on this device and will NOT sync.')) return false;
+                try {
+                    const raw = localStorage.getItem(cacheKey());
+                    if (raw) { const l = JSON.parse(raw); DB.cats = l.cats || []; DB.items = l.items || []; DB.orders = l.orders || []; DB.inventoryBills = l.inventoryBills || []; }
+                } catch (_) {}
+                SET_SYNC('offline');
+            }
+            NORMALIZE();
+            CACHE_LOCAL();
+            return true;
+        }
+
+        async function REFRESH_DATA() {
+            if (!CLOUD_LOADED) { alert('Offline mode - nothing to refresh.'); return; }
+            try {
+                SET_SYNC('saving');
+                const c = await FETCH_CLOUD();
+                DB.cats = c.cats; DB.items = c.items; DB.orders = c.orders; DB.inventoryBills = c.inventoryBills;
+                NORMALIZE(); CACHE_LOCAL(); SET_SYNC('ok'); RENDER_ALL();
+                if (el('reports').classList.contains('show')) RENDER_REPORTS();
+            } catch (e) { SET_SYNC('error'); alert('Could not refresh from the cloud.'); }
+        }
+
+        // saves categories + items (small document). Returns true/false.
+        async function SAVE() {
+            CACHE_LOCAL();
+            if (!CLOUD_LOADED) return true;
+            SET_SYNC('saving');
+            try {
+                await withTimeout(FB.collection('shops').doc(SHOP).set({
+                    lastUpdated: new Date().toISOString(),
+                    data: clean({ cats: DB.cats, items: DB.items })
+                }), 15000);
+                SET_SYNC('ok');
+                return true;
+            } catch (e) {
+                console.error('Cloud save failed:', e.message);
+                SET_SYNC('error');
+                return false;
+            }
+        }
+        async function SAVE_WARN() {
+            const ok = await SAVE();
+            if (!ok) alert('Saved on this device, but the cloud sync FAILED. Check your internet and make any change again to re-sync.');
+            return ok;
+        }
+
+        // ---------- rendering ----------
+        function RENDER_ALL() {
+            if (DB.currentCat !== 'all' && !DB.cats.includes(DB.currentCat)) DB.currentCat = 'all';
+            RENDER_CATS(); RENDER_MENU(); RENDER_SLOTS(); RENDER_CART();
+            RENDER_CAT_TABLE(); RENDER_INV_TABLE(); UPDATE_CAT_SELECT();
+            RENDER_BILLS_TABLE(); RENDER_INV_BILLS();
+        }
+
+        // ---------- POS ----------
+        function RENDER_CATS() {
+            let html = '<button class="' + (DB.currentCat === 'all' ? 'active' : '') + '" onclick="SET_CAT(\'all\')">All</button>';
+            DB.cats.forEach((c, i) => {
+                html += '<button class="' + (DB.currentCat === c ? 'active' : '') + '" onclick="SET_CAT_IDX(' + i + ')">' + esc(c) + '</button>';
+            });
+            el('catButtons').innerHTML = html;
+        }
+        function SET_CAT(c) { DB.currentCat = c; RENDER_MENU(); RENDER_CATS(); }
+        function SET_CAT_IDX(i) { SET_CAT(DB.cats[i]); }
+
+        function RENDER_MENU() {
+            const items = DB.currentCat === 'all' ? DB.items : DB.items.filter(i => i.cat === DB.currentCat);
+            if (items.length === 0) {
+                el('menuItems').innerHTML = '<p style="color:#7f8c8d; grid-column:1/-1;">No items yet. Add categories and items in the Admin tab.</p>';
+                return;
+            }
+            let html = '';
+            for (const i of items) {
+                html += '<div class="menu-item" ' + (i.stock <= 0 ? 'style="opacity:.45"' : '') + ' onclick="ADD_ITEM(' + Number(i.id) + ')">' + esc(i.icon || '📦') + '<br>' + esc(i.name) + '<br>₹' + esc(i.price) + '</div>';
+            }
+            el('menuItems').innerHTML = html;
+        }
+
+        function ADD_ITEM(id) {
+            const item = DB.items.find(i => i.id === id);
+            if (!item) return;
+            const cart = DB.carts[DB.currentCart];
+            const existing = cart.find(i => i.id === id);
+            const have = existing ? existing.qty : 0;
+            if (have + 1 > item.stock) { alert(item.stock <= 0 ? 'Out of stock' : 'Only ' + item.stock + ' in stock'); return; }
+            if (existing) existing.qty++;
+            else cart.push({ id: item.id, name: item.name, price: item.price, icon: item.icon, qty: 1 });
+            RENDER_CART();
+        }
+
+        function RENDER_CART() {
+            const cart = DB.carts[DB.currentCart];
+            let html = '';
+            for (const i of cart) {
+                html += '<div class="cart-item"><div>' + esc(i.name) + ' = ₹' + (i.price * i.qty) + '</div><div><button class="btn" onclick="UPDATE_QTY(' + Number(i.id) + ',-1)">−</button><span style="font-weight:600; margin:0 8px;">' + i.qty + '</span><button class="btn" onclick="UPDATE_QTY(' + Number(i.id) + ',1)">+</button><button class="btn btn-danger" onclick="REMOVE_ITEM(' + Number(i.id) + ')">✕</button></div></div>';
+            }
+            el('cartDisplay').innerHTML = html || '<p style="color:#7f8c8d;">Empty</p>';
+            el('cartTotal').textContent = '₹' + cart.reduce((s, i) => s + i.price * i.qty, 0);
+            RENDER_SLOTS();
+        }
+
+        function UPDATE_QTY(id, change) {
+            const cart = DB.carts[DB.currentCart];
+            const line = cart.find(i => i.id === id);
+            if (!line) return;
+            if (change > 0) {
+                const item = DB.items.find(i => i.id === id);
+                if (!item || line.qty + change > item.stock) { alert('Only ' + (item ? item.stock : 0) + ' in stock'); return; }
+            }
+            line.qty += change;
+            if (line.qty <= 0) DB.carts[DB.currentCart] = cart.filter(i => i.id !== id);
+            RENDER_CART();
+        }
+        function REMOVE_ITEM(id) { DB.carts[DB.currentCart] = DB.carts[DB.currentCart].filter(i => i.id !== id); RENDER_CART(); }
+        function CLEAR_CART() { DB.carts[DB.currentCart] = []; RENDER_CART(); }
+
+        function RENDER_SLOTS() {
+            let html = '';
+            for (let i = 0; i < 5; i++) {
+                const count = DB.carts[i].reduce((s, x) => s + x.qty, 0);
+                html += '<button class="order-slot ' + (DB.currentCart === i ? 'active' : '') + '" onclick="SET_SLOT(' + i + ')">Order ' + (i + 1) + '<br>(' + count + ')</button>';
+            }
+            el('orderSlots').innerHTML = html;
+        }
+        function SET_SLOT(i) { DB.currentCart = i; RENDER_CART(); }
+
+        // ---------- checkout ----------
+        function COMPUTE_TOTALS() {
+            const sub = DB.carts[DB.currentCart].reduce((s, i) => s + i.price * i.qty, 0);
+            const pct = document.querySelector('input[name="discType"][value="pct"]').checked;
+            let disc = pct ? sub * Math.min(100, Math.max(0, parseFloat(el('chkDiscPct').value) || 0)) / 100
+                           : Math.max(0, parseFloat(el('chkDiscFixed').value) || 0);
+            disc = Math.min(disc, sub);
+            const total = Math.round(sub - disc);
+            return { sub, disc: sub - total, total };
+        }
+
+        function CHECKOUT() {
+            if (DB.carts[DB.currentCart].length === 0) { alert('Cart is empty'); return; }
+            PENDING_ORDER_ID = 'ORD-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+            document.querySelector('input[name="discType"][value="pct"]').checked = true;
+            el('chkDiscPct').value = 0; el('chkDiscFixed').value = 0;
+            el('chkMethod').value = 'cash';
+            el('chkCustomer').value = ''; el('chkContact').value = '';
+            el('chkCashReceived').value = ''; el('chkSplitCash').value = 0; el('chkSplitOnline').value = 0;
+            SWITCH_DISCOUNT();
+            SWITCH_PAYMENT();
+            el('checkoutModal').classList.add('show');
+        }
+
+        function SWITCH_DISCOUNT() {
+            const pct = document.querySelector('input[name="discType"][value="pct"]').checked;
+            el('chkDiscPct').disabled = !pct;
+            el('chkDiscFixed').disabled = pct;
+            if (pct) el('chkDiscFixed').value = 0; else el('chkDiscPct').value = 0;
+            UPDATE_CHECKOUT();
+        }
+
+        function SWITCH_PAYMENT() {
+            const m = el('chkMethod').value;
+            el('cashReceivedDiv').style.display = m === 'cash' ? 'block' : 'none';
+            el('changeDiv').style.display = m === 'cash' ? 'block' : 'none';
+            el('splitSection').style.display = m === 'split' ? 'block' : 'none';
+            UPDATE_CHECKOUT();
+        }
+
+        function UPDATE_CHECKOUT() {
+            const t = COMPUTE_TOTALS();
+            el('chkSub').textContent = t.sub;
+            el('chkTotal').textContent = t.total;
+            CALCULATE_CHANGE();
+            UPDATE_SPLIT();
+        }
+
+        function CALCULATE_CHANGE() {
+            const total = COMPUTE_TOTALS().total;
+            const raw = el('chkCashReceived').value;
+            const received = raw === '' ? total : (parseFloat(raw) || 0);
+            el('chkChange').textContent = Math.round(Math.max(0, received - total));
+        }
+
+        function UPDATE_SPLIT() {
+            const total = COMPUTE_TOTALS().total;
+            let cash = parseFloat(el('chkSplitCash').value) || 0;
+            if (cash > total) { cash = total; el('chkSplitCash').value = total; }
+            if (cash < 0) { cash = 0; el('chkSplitCash').value = 0; }
+            el('chkSplitOnline').value = Math.round((total - cash) * 100) / 100;
+        }
+
+        async function FINISH_CHECKOUT() {
+            if (CHECKING_OUT) return;
+            const cart = DB.carts[DB.currentCart];
+            if (!cart || cart.length === 0) { alert('Cart is empty!'); return; }
+            const btn = el('completeBtn');
+            CHECKING_OUT = true; btn.disabled = true;
+            try {
+                const { sub, disc, total } = COMPUTE_TOTALS();
+                const method = el('chkMethod').value;
+                const order = {
+                    id: PENDING_ORDER_ID || ('ORD-' + Date.now()),
+                    date: new Date().toISOString(),
+                    items: clean(cart), subtotal: sub, discount: disc, total: total, method: method,
+                    customer: { name: el('chkCustomer').value.trim(), contact: el('chkContact').value.trim() }
+                };
+
+                if (method === 'cash') {
+                    const raw = el('chkCashReceived').value;
+                    const received = raw === '' ? total : parseFloat(raw);
+                    if (isNaN(received) || received < total) { alert('Cash received is less than the total (₹' + total + ').'); return; }
+                    order.cash = total; order.online = 0; order.received = received; order.change = received - total;
+                } else if (method === 'split') {
+                    const cash = parseFloat(el('chkSplitCash').value) || 0;
+                    if (cash < 0 || cash > total) { alert('Cash amount must be between 0 and ₹' + total + '.'); return; }
+                    order.cash = cash; order.online = Math.round((total - cash) * 100) / 100;
+                } else {
+                    order.cash = 0; order.online = total;
+                }
+
+                // stock check + deduction on a copy; applied only once the order is safely stored
+                const newItems = DB.items.map(i => ({ ...i }));
+                for (const c of cart) {
+                    const it = newItems.find(x => x.id === c.id);
+                    if (!it) { alert(c.name + ' no longer exists in the menu.'); return; }
+                    if (it.stock < c.qty) { alert('Not enough stock for ' + it.name + ' (available: ' + it.stock + ')'); return; }
+                    it.stock -= c.qty;
+                }
+
+                if (CLOUD_LOADED) {
+                    SET_SYNC('saving');
+                    try {
+                        const ref = FB.collection('shops').doc(SHOP);
+                        const batch = FB.batch();
+                        batch.set(ref.collection('orders').doc(order.id), clean(order));
+                        batch.set(ref, { lastUpdated: new Date().toISOString(), data: clean({ cats: DB.cats, items: newItems }) });
+                        await withTimeout(batch.commit(), 15000);
+                        SET_SYNC('ok');
+                    } catch (e) {
+                        console.error('Checkout save failed:', e.message);
+                        SET_SYNC('error');
+                        alert('Could not save the order to the cloud, so NOTHING was recorded.\nCheck the internet connection and press "Complete Order" again.');
+                        return;
+                    }
+                }
+
+                DB.items = newItems;
+                DB.orders.push(order);
+                DB.carts[DB.currentCart] = [];
+                PENDING_ORDER_ID = null;
+                CACHE_LOCAL();
+                el('checkoutModal').classList.remove('show');
+                RENDER_CART(); RENDER_MENU(); RENDER_INV_TABLE(); RENDER_BILLS_TABLE();
+                alert('✅ Order complete!\n' + order.id + (method === 'cash' && order.change > 0 ? '\nReturn change: ₹' + Math.round(order.change) : ''));
+            } finally {
+                CHECKING_OUT = false; btn.disabled = false;
+            }
+        }
+
+        // ---------- admin: categories ----------
+        function RENDER_CAT_TABLE() {
+            if (DB.cats.length === 0) {
+                el('catTable').innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px; color:#7f8c8d;">No categories yet</td></tr>';
+                return;
+            }
+            let html = '<tr><th>Category</th><th>Items</th><th>Action</th></tr>';
+            DB.cats.forEach((c, i) => {
+                const count = DB.items.filter(x => x.cat === c).length;
+                html += '<tr><td>' + esc(c) + '</td><td>' + count + '</td><td><button class="btn" onclick="EDIT_CAT(' + i + ')">Edit</button><button class="btn btn-danger" onclick="DEL_CAT(' + i + ')">Delete</button></td></tr>';
+            });
+            el('catTable').innerHTML = html;
+        }
+
+        function ADD_CAT_MODAL() {
+            EDIT_CAT_NAME = null;
+            el('catModalTitle').textContent = 'Add Category';
+            el('catModalName').value = '';
+            el('catModalItems').innerHTML = '<p style="color:#7f8c8d; font-size:12px;">Items can be added after the category is saved</p>';
+            el('catModal').classList.add('show');
+        }
+
+        function EDIT_CAT(i) {
+            EDIT_CAT_NAME = DB.cats[i];
+            el('catModalTitle').textContent = 'Edit Category';
+            el('catModalName').value = EDIT_CAT_NAME;
+            RENDER_CAT_ITEMS();
+            el('catModal').classList.add('show');
+        }
+
+        function RENDER_CAT_ITEMS() {
+            const items = DB.items.filter(i => i.cat === EDIT_CAT_NAME);
+            el('catModalItems').innerHTML = items.length === 0
+                ? '<p style="color:#7f8c8d; font-size:12px;">No items in this category</p>'
+                : items.map(i => '<div style="padding:8px; background:white; margin-bottom:6px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;"><span style="font-size:12px;"><strong>' + esc(i.name) + '</strong> - ₹' + esc(i.price) + ' (Stock: ' + esc(i.stock) + ')</span><button class="btn" style="padding:4px 8px; font-size:10px;" onclick="EDIT_ITEM(' + Number(i.id) + ')">Edit</button></div>').join('');
+        }
+
+        function ADD_ITEM_TO_CAT() {
+            if (!EDIT_CAT_NAME) { alert('Save the category first, then add items to it.'); return; }
+            const cat = EDIT_CAT_NAME;
+            CLOSE_MODAL('catModal');
+            ADD_ITEM_MODAL();
+            el('itemModalCat').value = cat;
+        }
+
+        async function SAVE_CAT() {
+            const name = el('catModalName').value.toLowerCase().trim();
+            if (!name) { alert('Category name cannot be empty'); return; }
+            if (name !== EDIT_CAT_NAME && DB.cats.includes(name)) { alert('Category already exists'); return; }
+            if (EDIT_CAT_NAME) {
+                DB.cats = DB.cats.map(c => c === EDIT_CAT_NAME ? name : c);
+                DB.items.forEach(i => { if (i.cat === EDIT_CAT_NAME) i.cat = name; });
+                if (DB.currentCat === EDIT_CAT_NAME) DB.currentCat = name;
+            } else {
+                DB.cats.push(name);
+            }
+            CLOSE_MODAL('catModal');
+            RENDER_ALL();
+            await SAVE_WARN();
+        }
+
+        async function DEL_CAT(i) {
+            const c = DB.cats[i];
+            if (DB.items.some(x => x.cat === c)) { alert('This category still has items. Delete or move them first.'); return; }
+            if (!confirm('Delete category "' + c + '"?')) return;
+            DB.cats.splice(i, 1);
+            RENDER_ALL();
+            await SAVE_WARN();
+        }
+
+        // ---------- admin: items ----------
+        function RENDER_INV_TABLE() {
+            if (DB.items.length === 0) {
+                el('invTable').innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#7f8c8d;">No items yet</td></tr>';
+                return;
+            }
+            let html = '<tr><th>Item</th><th>Category</th><th>Price</th><th>Stock</th><th>Action</th></tr>';
+            for (const i of DB.items) {
+                html += '<tr><td>' + esc(i.icon || '📦') + ' ' + esc(i.name) + '</td><td>' + esc(i.cat) + '</td><td>₹' + esc(i.price) + '</td><td>' + esc(i.stock) + '</td><td><button class="btn" onclick="EDIT_ITEM(' + Number(i.id) + ')">Edit</button><button class="btn btn-danger" onclick="DEL_ITEM(' + Number(i.id) + ')">Delete</button></td></tr>';
+            }
+            el('invTable').innerHTML = html;
+        }
+
+        function UPDATE_CAT_SELECT() {
+            el('itemModalCat').innerHTML = DB.cats.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
+        }
+
+        function ADD_ITEM_MODAL() {
+            if (DB.cats.length === 0) { alert('Create a category first!'); return; }
+            EDIT_ID = null;
+            UPDATE_CAT_SELECT();
+            el('itemModalTitle').textContent = 'Add Item';
+            el('itemModalName').value = '';
+            el('itemModalCat').value = DB.cats[0];
+            el('itemModalPrice').value = '';
+            el('itemModalStock').value = '';
+            el('itemModal').classList.add('show');
+        }
+
+        function EDIT_ITEM(id) {
+            const item = DB.items.find(i => i.id === id);
+            if (!item) return;
+            EDIT_ID = id;
+            UPDATE_CAT_SELECT();
+            el('itemModalTitle').textContent = 'Edit Item';
+            el('itemModalName').value = item.name;
+            el('itemModalCat').value = item.cat;
+            el('itemModalPrice').value = item.price;
+            el('itemModalStock').value = item.stock;
+            CLOSE_MODAL('catModal');
+            el('itemModal').classList.add('show');
+        }
+
+        async function SAVE_ITEM() {
+            const name = el('itemModalName').value.trim();
+            const cat = el('itemModalCat').value;
+            const price = parseFloat(el('itemModalPrice').value);
+            const stock = parseInt(el('itemModalStock').value, 10);
+            if (!name) { alert('Item name is required'); return; }
+            if (!cat) { alert('Category is required'); return; }
+            if (isNaN(price) || price < 0) { alert('Price must be a valid number'); return; }
+            if (isNaN(stock) || stock < 0) { alert('Stock must be a valid number'); return; }
+
+            if (EDIT_ID) {
+                const item = DB.items.find(i => i.id === EDIT_ID);
+                if (item) { item.name = name; item.cat = cat; item.price = price; item.stock = stock; }
+            } else {
+                const newId = DB.items.reduce((m, i) => Math.max(m, Number(i.id) || 0), 0) + 1;
+                DB.items.push({ id: newId, name: name, cat: cat, price: price, stock: stock, icon: '📦' });
+            }
+            CLOSE_MODAL('itemModal');
+            RENDER_ALL();
+            await SAVE_WARN();
+        }
+
+        async function DEL_ITEM(id) {
+            const item = DB.items.find(i => i.id === id);
+            if (!item || !confirm('Delete item "' + item.name + '"?')) return;
+            DB.items = DB.items.filter(i => i.id !== id);
+            DB.carts = DB.carts.map(c => c.filter(l => l.id !== id));
+            RENDER_ALL();
+            await SAVE_WARN();
+        }
+
+        // ---------- tabs ----------
+        function SHOW_TAB(tab) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('show'));
+            el(tab).classList.add('show');
+            document.querySelectorAll('.header-right button[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+            if (tab === 'reports') RENDER_REPORTS();
+            if (tab === 'bills') RENDER_BILLS_TABLE();
+        }
+
+        // ---------- reports ----------
+        function BUILD_YEAR_SELECT() {
+            const cy = new Date().getFullYear();
+            let html = '';
+            for (let y = 2024; y <= cy + 2; y++) html += '<option value="' + y + '"' + (y === cy ? ' selected' : '') + '>' + y + '</option>';
+            el('customYearSelect').innerHTML = html;
+        }
+        function SELECTED_YEAR() { return parseInt(el('customYearSelect').value, 10) || new Date().getFullYear(); }
+
+        function REPORT_PERIOD(p) {
+            DB.period = p;
+            document.querySelectorAll('.period-buttons button').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+            el('customYearSection').style.display = p === 'custom' ? 'block' : 'none';
+            RENDER_REPORTS();
+        }
+
+        function payParts(o) {
+            if (o.method === 'cash') return { cash: o.total, online: 0 };
+            if (o.method === 'online') return { cash: 0, online: o.total };
+            return { cash: Number(o.cash) || 0, online: Number(o.online) || 0 };
+        }
+        function aggregate(list) {
+            const r = { total: 0, cash: 0, online: 0, count: 0 };
+            list.forEach(o => { const p = payParts(o); r.total += o.total; r.cash += p.cash; r.online += p.online; r.count++; });
+            return r;
+        }
+
+        function periodOrders() {
+            const now = new Date();
+            const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+            return DB.orders.filter(o => {
+                const d = new Date(o.date);
+                switch (DB.period) {
+                    case 'today':   return d.toDateString() === now.toDateString();
+                    case 'weekly':  return d >= weekStart && d <= now;
+                    case 'monthly': return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                    case 'yearly':  return d.getFullYear() === now.getFullYear();
+                    case 'custom':  return d.getFullYear() === SELECTED_YEAR();
+                }
+                return true;
+            });
+        }
+
+        // grouped rows for weekly / monthly / yearly / custom
+        function groupedRows(list) {
+            const now = new Date();
+            const groups = {};
+            list.forEach(o => {
+                const d = new Date(o.date);
+                let key, label;
+                if (DB.period === 'weekly') { key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); label = fmtDate(d); }
+                else if (DB.period === 'monthly') { const w = Math.ceil(d.getDate() / 7); key = w; label = 'Week ' + w; }
+                else { key = d.getMonth(); label = MONTHS[d.getMonth()]; }
+                (groups[key] = groups[key] || { key: key, label: label, orders: [] }).orders.push(o);
+            });
+            return Object.values(groups).sort((a, b) => a.key - b.key).map(g => ({ label: g.label, ...aggregate(g.orders) }));
+        }
+
+        function RENDER_REPORTS() {
+            const list = periodOrders();
+            const a = aggregate(list);
+            el('rptSales').textContent = Math.round(a.total);
+            el('rptOrders').textContent = a.count;
+            el('rptCash').textContent = Math.round(a.cash);
+            el('rptOnline').textContent = Math.round(a.online);
+
+            // monthly chart for the relevant year (independent of Today/Weekly/Monthly selection)
+            const year = DB.period === 'custom' ? SELECTED_YEAR() : new Date().getFullYear();
+            const monthly = new Array(12).fill(0);
+            DB.orders.forEach(o => { const d = new Date(o.date); if (d.getFullYear() === year) monthly[d.getMonth()] += o.total; });
+            if (typeof Chart !== 'undefined') {
+                if (CHART_INSTANCE) CHART_INSTANCE.destroy();
+                CHART_INSTANCE = new Chart(el('salesChart').getContext('2d'), {
+                    type: 'bar',
+                    data: { labels: MONTHS, datasets: [{ label: 'Monthly Sales ' + year, data: monthly, backgroundColor: 'rgba(102,126,234,0.7)', borderColor: '#667eea', borderWidth: 2 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true } } }
+                });
+            }
+
+            let html = '';
+            if (list.length === 0) {
+                html = '<p style="color:#7f8c8d;">No orders for this period.</p>';
+            } else if (DB.period === 'today') {
+                html = '<table style="width:100%; font-size:12px;"><tr><th>Time</th><th>Items</th><th>Amount</th><th>Payment</th><th>Customer</th></tr>';
+                list.slice().sort((x, y) => new Date(y.date) - new Date(x.date)).forEach(o => {
+                    html += '<tr><td>' + new Date(o.date).toLocaleTimeString() + '</td><td>' + esc(o.items.map(i => i.name + ' x' + i.qty).join(', ')) + '</td><td>₹' + Math.round(o.total) + '</td><td>' + esc(o.method) + '</td><td>' + esc(o.customer.name || '—') + '</td></tr>';
+                });
+                html += '</table>';
+            } else {
+                const head = DB.period === 'weekly' ? 'Date' : (DB.period === 'monthly' ? 'Week' : 'Month');
+                groupedRows(list).forEach(r => {
+                    html += '<div class="breakdown-item"><div><strong>' + head + '</strong><br>' + esc(r.label) + '</div><div><strong>Sale</strong><br>₹' + Math.round(r.total) + '</div><div><strong>Cash</strong><br>₹' + Math.round(r.cash) + '</div><div><strong>Online</strong><br>₹' + Math.round(r.online) + '</div><div><strong>Orders</strong><br>' + r.count + '</div></div>';
+                });
+            }
+            el('rptDetails').innerHTML = html;
+        }
+
+        function csvCell(v) {
+            if (typeof v === 'number') return String(Math.round(v * 100) / 100);
+            let s = String(v == null ? '' : v);
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;      // neutralise spreadsheet formulas
+            return '"' + s.replace(/"/g, '""') + '"';
+        }
+        function csvRow(arr) { return arr.map(csvCell).join(',') + '\r\n'; }
+
+        function EXPORT_EXCEL() {
+            const list = periodOrders();
+            let csv = '';
+            if (DB.period === 'today') {
+                csv += csvRow(['Order ID','DateTime','Items','Subtotal','Discount','Total','Payment Method','Cash','Online','Customer Name','Customer Contact']);
+                list.forEach(o => {
+                    const p = payParts(o);
+                    csv += csvRow([o.id, fmtDateTime(o.date), o.items.map(i => i.name + ' x' + i.qty).join('; '), o.subtotal, o.discount, o.total, o.method, p.cash, p.online, o.customer.name || '', o.customer.contact || '']);
+                });
+            } else {
+                const rows = groupedRows(list);
+                const now = new Date();
+                if (DB.period === 'weekly') {
+                    csv += csvRow(['Date','Total Sale','Cash','Online','Orders']);
+                    rows.forEach(r => csv += csvRow([r.label, r.total, r.cash, r.online, r.count]));
+                } else if (DB.period === 'monthly') {
+                    csv += csvRow(['Month','Year','Week','Total Sale','Cash','Online','Orders']);
+                    rows.forEach(r => csv += csvRow([MONTHS[now.getMonth()], now.getFullYear(), r.label, r.total, r.cash, r.online, r.count]));
+                } else {
+                    const y = DB.period === 'custom' ? SELECTED_YEAR() : now.getFullYear();
+                    csv += csvRow(['Month','Year','Total Sale','Cash','Online','Orders']);
+                    rows.forEach(r => csv += csvRow([r.label, y, r.total, r.cash, r.online, r.count]));
+                }
+            }
+            const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            const tag = DB.period === 'custom' ? 'custom_' + SELECTED_YEAR() : DB.period;
+            link.download = 'sales_' + tag + '_' + new Date().toISOString().split('T')[0] + '.csv';
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        // ---------- bills ----------
+        function RENDER_BILLS_TABLE() {
+            if (DB.orders.length === 0) {
+                el('billsTable').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#7f8c8d;">No bills yet. Complete an order to generate a bill.</td></tr>';
+                return;
+            }
+            let list = DB.orders;
+            const f = el('billsDateFilter').value;
+            if (f) {
+                const [y, m, d] = f.split('-').map(Number);
+                const target = new Date(y, m - 1, d).toDateString();
+                list = list.filter(b => new Date(b.date).toDateString() === target);
+            }
+            if (list.length === 0) {
+                el('billsTable').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#7f8c8d;">No bills for the selected date.</td></tr>';
+                return;
+            }
+            let html = '<tr><th>Order ID</th><th>Date</th><th>Amount</th><th>Payment</th><th>Customer</th><th>Contact</th><th>Action</th></tr>';
+            list.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(b => {
+                html += '<tr><td>' + esc(b.id) + '</td><td>' + esc(fmtDateTime(b.date)) + '</td><td>₹' + Math.round(b.total) + '</td><td>' + esc(b.method) + '</td><td>' + esc(b.customer.name || '—') + '</td><td>' + esc(b.customer.contact || '—') + '</td><td><button class="btn" onclick="VIEW_BILL(\'' + esc(b.id) + '\')">View</button><button class="btn btn-success" onclick="DOWNLOAD_PDF(\'' + esc(b.id) + '\')">PDF</button></td></tr>';
+            });
+            el('billsTable').innerHTML = html;
+        }
+
+        function CLEAR_DATE_FILTER() { el('billsDateFilter').value = ''; RENDER_BILLS_TABLE(); }
+
+        function BILL_HTML(b) {
+            const p = payParts(b);
+            const row = (l, r, extra) => '<div style="display:flex; justify-content:space-between;' + (extra || '') + '"><span>' + l + '</span><span>' + r + '</span></div>';
+            return '<div style="background:white; padding:20px; font-family:monospace; font-size:13px; color:#000;">' +
+                '<div style="text-align:center; margin-bottom:15px; border-bottom:2px solid #667eea; padding-bottom:12px;">' +
+                    '<h3 style="margin:0 0 5px 0; font-size:16px;">' + esc(SHOP) + '</h3>' +
+                    '<p style="margin:0; font-size:11px;">' + esc(fmtDateTime(b.date)) + '</p>' +
+                    '<p style="margin:0; font-size:10px;">Order: ' + esc(b.id) + '</p></div>' +
+                '<div style="margin-bottom:12px;"><div style="font-weight:bold; margin-bottom:8px;">Items:</div>' +
+                    b.items.map(i => row(esc(i.name) + ' (₹' + esc(i.price) + ') x' + esc(i.qty), '₹' + (i.price * i.qty))).join('') + '</div>' +
+                '<div style="border-top:2px solid #667eea; padding-top:10px;">' +
+                    row('Subtotal', '₹' + Math.round(b.subtotal)) +
+                    (b.discount > 0 ? row('Discount', '-₹' + Math.round(b.discount)) : '') +
+                    row('Total', '₹' + Math.round(b.total), ' font-weight:bold; font-size:14px;') +
+                    '<div style="margin-top:10px; padding-top:10px; border-top:1px solid #ccc;">' +
+                        '<p style="margin:3px 0;"><strong>Payment:</strong> ' + esc(b.method) + '</p>' +
+                        (p.cash > 0 ? '<p style="margin:3px 0;"><strong>Cash:</strong> ₹' + Math.round(p.cash) + '</p>' : '') +
+                        (p.online > 0 ? '<p style="margin:3px 0;"><strong>Online:</strong> ₹' + Math.round(p.online) + '</p>' : '') +
+                        (b.received ? '<p style="margin:3px 0;"><strong>Cash received:</strong> ₹' + Math.round(b.received) + '</p>' : '') +
+                        (b.change > 0 ? '<p style="margin:3px 0;"><strong>Change returned:</strong> ₹' + Math.round(b.change) + '</p>' : '') +
+                        (b.customer.name ? '<p style="margin:3px 0;"><strong>Customer:</strong> ' + esc(b.customer.name) + '</p>' : '') +
+                        (b.customer.contact ? '<p style="margin:3px 0;"><strong>Contact:</strong> ' + esc(b.customer.contact) + '</p>' : '') +
+                    '</div></div>' +
+                '<p style="text-align:center; margin-top:15px; font-size:11px;">Thank you! Visit again.</p></div>';
+        }
+
+        function VIEW_BILL(id) {
+            const bill = DB.orders.find(b => b.id === id);
+            if (!bill) return;
+            CURRENT_BILL = bill;
+            el('billContent').innerHTML = BILL_HTML(bill);
+            el('billViewModal').classList.add('show');
+        }
+
+        function DOWNLOAD_PDF(id) {
+            const bill = DB.orders.find(b => b.id === id);
+            if (!bill) return;
+            if (typeof html2pdf === 'undefined') { alert('PDF library failed to load. Reload the page and try again.'); return; }
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'position:fixed; left:0; top:0; width:380px; background:#fff; z-index:-1;';
+            wrap.innerHTML = BILL_HTML(bill);
+            document.body.appendChild(wrap);
+            html2pdf().set({
+                margin: 5, filename: 'bill-' + bill.id + '.pdf', image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            }).from(wrap).save().then(() => wrap.remove()).catch(() => wrap.remove());
+        }
+        function DOWNLOAD_BILL() { if (CURRENT_BILL) DOWNLOAD_PDF(CURRENT_BILL.id); }
+
+        // ---------- franchise inventory bills ----------
+        function UPLOAD_INVENTORY_BILL(event) {
+            const input = el('invFileInput');
+            const file = input.files[0];
+            input.value = '';
+            if (file) HANDLE_INV_FILE(file);
+        }
+
+        function HANDLE_INV_FILE(file) {
+            if (!CLOUD_LOADED) { alert('Uploads need a cloud connection. Re-login when online.'); return; }
+            if (file.size > MAX_INV_FILE) { alert('File too large. Maximum size is ' + Math.round(MAX_INV_FILE / 1024) + ' KB.'); return; }
+            const reader = new FileReader();
+            reader.onload = async function (e) {
+                const bill = { id: 'INV-' + Date.now(), date: new Date().toISOString(), fileName: file.name, fileType: file.type, fileSize: file.size, fileData: e.target.result };
+                try {
+                    SET_SYNC('saving');
+                    await withTimeout(FB.collection('shops').doc(SHOP).collection('inventoryBills').doc(bill.id).set(clean(bill)), 20000);
+                    DB.inventoryBills.push(bill);
+                    SET_SYNC('ok');
+                    RENDER_INV_BILLS();
+                    alert('✅ File uploaded');
+                } catch (err) {
+                    SET_SYNC('error');
+                    alert('Upload failed. Check your internet connection and try again.');
+                }
+            };
+            reader.onerror = () => alert('Could not read the file.');
+            reader.readAsDataURL(file);
+        }
+
+        function RENDER_INV_BILLS() {
+            if (DB.inventoryBills.length === 0) {
+                el('inventoryBillsTable').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#7f8c8d;">No bills uploaded yet</td></tr>';
+                return;
+            }
+            let html = '<tr><th>ID</th><th>Uploaded</th><th>File Name</th><th>Size</th><th>Action</th></tr>';
+            DB.inventoryBills.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(b => {
+                html += '<tr><td>' + esc(b.id) + '</td><td>' + esc(fmtDateTime(b.date)) + '</td><td>' + esc(b.fileName) + '</td><td>' + Math.round((b.fileSize || 0) / 1024) + ' KB</td><td><button class="btn btn-success" onclick="DOWNLOAD_INV_BILL(\'' + esc(b.id) + '\')">Download</button><button class="btn btn-danger" onclick="DEL_INV_BILL(\'' + esc(b.id) + '\')">Delete</button></td></tr>';
+            });
+            el('inventoryBillsTable').innerHTML = html;
+        }
+
+        function DOWNLOAD_INV_BILL(id) {
+            const b = DB.inventoryBills.find(x => x.id === id);
+            if (!b || !b.fileData) { alert('File data is not available.'); return; }
+            const link = document.createElement('a');
+            link.href = b.fileData; link.download = b.fileName;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
+        async function DEL_INV_BILL(id) {
+            if (!confirm('Delete this bill?')) return;
+            try {
+                if (CLOUD_LOADED) await withTimeout(FB.collection('shops').doc(SHOP).collection('inventoryBills').doc(id).delete(), 15000);
+                DB.inventoryBills = DB.inventoryBills.filter(b => b.id !== id);
+                RENDER_INV_BILLS();
+            } catch (e) { alert('Delete failed. Check your internet connection and try again.'); }
+        }
+
+        // ---------- modals & misc ----------
+        function CLOSE_MODAL(id) { el(id).classList.remove('show'); }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            ['shopInput', 'keyInput'].forEach(id => el(id).addEventListener('keydown', e => { if (e.key === 'Enter') LOGIN(); }));
+            const box = el('uploadBox');
+            ['dragover', 'drop'].forEach(ev => box.addEventListener(ev, e => e.preventDefault()));
+            box.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) HANDLE_INV_FILE(f); });
+        });
     </script>
 </body>
 </html>
