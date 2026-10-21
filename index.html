@@ -447,7 +447,7 @@
                 if (docSnap.exists) {
                     const data = docSnap.data();
                     console.log('📊 Full document data:', data);
-                    console.log('🔑 Type of licensess:', typeof data.licenses);
+                    console.log('🔑 Type of licenses:', typeof data.licenses);
                     console.log('🔑 licenses value:', data.licenses);
 
                     if (data.licenses && typeof data.licenses === 'object') {
@@ -523,6 +523,7 @@
                 document.getElementById('app').classList.add('show');
                 document.getElementById('shopName').textContent = shop;
                 await LOAD();
+                INIT_DATA_IF_EMPTY();
                 RENDER_ALL();
             } else {
                 console.error('❌ LOGIN FAILED - Credentials do not match');
@@ -740,6 +741,7 @@
                 document.getElementById('catTable').innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #7f8c8d;">No categories yet</td></tr>';
                 return;
             }
+            if (!DB.items) DB.items = [];
             let html = '<tr><th>Category</th><th>Items</th><th>Action</th></tr>';
             for (let c of DB.cats) {
                 let count = DB.items.filter(i => i.cat === c).length;
@@ -781,6 +783,7 @@
         }
 
         function RENDER_CAT_ITEMS() {
+            if (!DB.items) DB.items = [];
             let items = DB.items.filter(i => i.cat === EDIT_CAT_NAME);
             let html = '';
             if (items.length === 0) {
@@ -1444,6 +1447,41 @@
             }
             let data = localStorage.getItem('iceflow_prod_' + DB.shop);
             if (data) DB = JSON.parse(data);
+        }
+
+        function INIT_DATA_IF_EMPTY() {
+            console.log('🔧 Checking if data needs initialization...');
+
+            // Ensure all required fields exist
+            if (!DB.items) DB.items = [];
+            if (!DB.cats) DB.cats = ['ice-cream', 'toppings', 'combos', 'beverages', 'shakes', 'mastani'];
+            if (!DB.orders) DB.orders = [];
+            if (!DB.bills) DB.bills = [];
+            if (!DB.inventoryBills) DB.inventoryBills = [];
+            if (!DB.carts) DB.carts = [[],[],[],[],[]];
+            if (DB.currentCart === undefined) DB.currentCart = 0;
+            if (!DB.currentCat) DB.currentCat = 'all';
+            if (!DB.period) DB.period = 'today';
+            if (DB.customYear === undefined) DB.customYear = 2026;
+
+            console.log('   Items count:', DB.items.length);
+            console.log('   Orders count:', DB.orders.length);
+
+            if (DB.items.length === 0) {
+                console.log('📝 No items found - initializing with default items');
+                DB.items = [
+                    {id:1, name:'Vanilla', cat:'ice-cream', price:80, stock:50, icon:'🍦'},
+                    {id:2, name:'Chocolate', cat:'ice-cream', price:80, stock:40, icon:'🍫'},
+                    {id:3, name:'Strawberry', cat:'ice-cream', price:80, stock:35, icon:'🍓'},
+                    {id:4, name:'Double Scoop', cat:'combos', price:150, stock:999, icon:'🍦'},
+                    {id:5, name:'Chips', cat:'toppings', price:20, stock:100, icon:'🥔'},
+                    {id:6, name:'Sprinkles', cat:'toppings', price:15, stock:120, icon:'✨'},
+                    {id:7, name:'Vanilla Shake', cat:'shakes', price:60, stock:40, icon:'☕'},
+                    {id:8, name:'Mango Mastani', cat:'mastani', price:120, stock:30, icon:'🥭'}
+                ];
+                SAVE();
+                console.log('✅ Default items initialized and saved');
+            }
         }
 
         function LOGOUT() {
