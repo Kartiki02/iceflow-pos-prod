@@ -375,9 +375,7 @@
         }
 
         let FB = null, FIRESTORE_READY = false;
-        const ENV = window.location.hostname.includes('uat') ? 'uat' : 'prod';
 
-        addLog('🌍 ENVIRONMENT: ' + ENV);
         addLog('🔗 URL: ' + window.location.hostname);
 
         // Wait for Firebase SDK to load
