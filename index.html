@@ -108,6 +108,11 @@
             <input id="shopInput" type="text" placeholder="Shop Name">
             <input id="keyInput" type="password" placeholder="License Key">
             <button onclick="LOGIN()">Login</button>
+
+            <div id="debugPanel" style="margin-top: 20px; padding: 10px; background: #f5f5f5; border-radius: 5px; font-size: 11px; color: #333; max-height: 150px; overflow-y: auto; border: 1px solid #ddd; font-family: monospace;">
+                <strong style="display: block; margin-bottom: 5px;">📊 Debug:</strong>
+                <div id="debugLogs" style="white-space: pre-wrap; word-break: break-all; line-height: 1.4;"></div>
+            </div>
         </div>
     </div>
 
@@ -375,7 +380,9 @@
         }
 
         let FB = null, FIRESTORE_READY = false;
+        const ENV = window.location.hostname.includes('uat') ? 'uat' : 'prod';
 
+        addLog('🌍 ENVIRONMENT: ' + ENV);
         addLog('🔗 URL: ' + window.location.hostname);
 
         // Wait for Firebase SDK to load
@@ -464,14 +471,14 @@
 
         let DB = {
             shop: '',
-            cats: ['ice-cream', 'toppings', 'combos', 'beverages', 'shakes', 'mastani'],
+            cats: ['scoop', 'kulfi', 'shakes', 'mastani', 'family pack', 'golden series family pack'],
             items: [
-                {id:1, name:'Vanilla', cat:'ice-cream', price:80, stock:50, icon:'🍦'},
-                {id:2, name:'Chocolate', cat:'ice-cream', price:80, stock:40, icon:'🍫'},
-                {id:3, name:'Strawberry', cat:'ice-cream', price:80, stock:35, icon:'🍓'},
-                {id:4, name:'Double Scoop', cat:'combos', price:150, stock:999, icon:'🍦'},
-                {id:5, name:'Chips', cat:'toppings', price:20, stock:100, icon:'🥔'},
-                {id:6, name:'Sprinkles', cat:'toppings', price:15, stock:120, icon:'✨'},
+                {id:1, name:'Vanilla', cat:'scoop', price:80, stock:50, icon:'🍦'},
+                {id:2, name:'Chocolate', cat:'scoop', price:80, stock:40, icon:'🍫'},
+                {id:3, name:'Strawberry', cat:'scoop', price:80, stock:35, icon:'🍓'},
+                {id:4, name:'Double Scoop', cat:'scoop', price:150, stock:999, icon:'🍦'},
+                {id:5, name:'Chips', cat:'scoop', price:20, stock:100, icon:'🥔'},
+                {id:6, name:'Sprinkles', cat:'scoop', price:15, stock:120, icon:'✨'},
                 {id:7, name:'Vanilla Shake', cat:'shakes', price:60, stock:40, icon:'☕'},
                 {id:8, name:'Mango Mastani', cat:'mastani', price:120, stock:30, icon:'🥭'}
             ],
@@ -800,24 +807,37 @@
         }
 
         function SAVE_CAT() {
-            let name = document.getElementById('catModalName').value.toLowerCase().trim();
-            if (!name) return;
-
-            if (EDIT_CAT_NAME) {
-                if (name !== EDIT_CAT_NAME && DB.cats.includes(name)) {
-                    alert('Category already exists');
+            try {
+                let name = document.getElementById('catModalName').value.toLowerCase().trim();
+                if (!name) {
+                    alert('⚠️ Category name cannot be empty');
                     return;
                 }
-                DB.cats = DB.cats.map(c => c === EDIT_CAT_NAME ? name : c);
-                DB.items.forEach(i => { if (i.cat === EDIT_CAT_NAME) i.cat = name; });
-            } else {
-                if (DB.cats.includes(name)) { alert('Category already exists'); return; }
-                DB.cats.push(name);
-            }
 
-            SAVE();
-            RENDER_ALL();
-            CLOSE_MODAL('catModal');
+                if (EDIT_CAT_NAME) {
+                    if (name !== EDIT_CAT_NAME && DB.cats.includes(name)) {
+                        alert('⚠️ Category already exists');
+                        return;
+                    }
+                    DB.cats = DB.cats.map(c => c === EDIT_CAT_NAME ? name : c);
+                    DB.items.forEach(i => { if (i.cat === EDIT_CAT_NAME) i.cat = name; });
+                } else {
+                    if (DB.cats.includes(name)) {
+                        alert('⚠️ Category already exists');
+                        return;
+                    }
+                    DB.cats.push(name);
+                }
+
+                console.log('💾 Saving category:', name, 'All cats:', DB.cats);
+                SAVE();
+                RENDER_ALL();
+                alert('✅ Category saved successfully!');
+                CLOSE_MODAL('catModal');
+            } catch(e) {
+                console.error('❌ Error saving category:', e.message);
+                alert('❌ Error: ' + e.message);
+            }
         }
 
         function DEL_CAT(c) {
@@ -854,29 +874,51 @@
         }
 
         function SAVE_ITEM() {
-            let name = document.getElementById('itemModalName').value.trim();
-            let cat = document.getElementById('itemModalCat').value;
-            let price = parseInt(document.getElementById('itemModalPrice').value);
-            let stock = parseInt(document.getElementById('itemModalStock').value);
+            try {
+                let name = document.getElementById('itemModalName').value.trim();
+                let cat = document.getElementById('itemModalCat').value;
+                let price = parseInt(document.getElementById('itemModalPrice').value);
+                let stock = parseInt(document.getElementById('itemModalStock').value);
 
-            if (!name || !price || isNaN(stock)) return;
-
-            if (EDIT_ID) {
-                let item = DB.items.find(i => i.id === EDIT_ID);
-                if (item) {
-                    item.name = name;
-                    item.cat = cat;
-                    item.price = price;
-                    item.stock = stock;
+                if (!name) {
+                    alert('⚠️ Item name is required');
+                    return;
                 }
-            } else {
-                let newId = Math.max(...DB.items.map(i => i.id), 0) + 1;
-                DB.items.push({id: newId, name: name, cat: cat, price: price, stock: stock, icon: '📦'});
-            }
+                if (!cat) {
+                    alert('⚠️ Category is required');
+                    return;
+                }
+                if (isNaN(price) || price < 0) {
+                    alert('⚠️ Price must be a valid positive number');
+                    return;
+                }
+                if (isNaN(stock) || stock < 0) {
+                    alert('⚠️ Stock must be a valid number');
+                    return;
+                }
 
-            SAVE();
-            RENDER_ALL();
-            CLOSE_MODAL('itemModal');
+                if (EDIT_ID) {
+                    let item = DB.items.find(i => i.id === EDIT_ID);
+                    if (item) {
+                        item.name = name;
+                        item.cat = cat;
+                        item.price = price;
+                        item.stock = stock;
+                    }
+                } else {
+                    let newId = Math.max(...DB.items.map(i => i.id), 0) + 1;
+                    DB.items.push({id: newId, name: name, cat: cat, price: price, stock: stock, icon: '📦'});
+                }
+
+                console.log('💾 Saving item:', name, 'to category:', cat);
+                SAVE();
+                RENDER_ALL();
+                alert('✅ Item saved successfully!');
+                CLOSE_MODAL('itemModal');
+            } catch(e) {
+                console.error('❌ Error saving item:', e.message);
+                alert('❌ Error: ' + e.message);
+            }
         }
 
         function DEL_ITEM(id) {
@@ -1352,14 +1394,21 @@
 
         // PERSISTENCE
         async function SAVE_TO_FIREBASE() {
-            if (!FIRESTORE_READY || !FB) return;
+            if (!FIRESTORE_READY || !FB) {
+                console.log('⚠️ Firebase not ready, skipping cloud save');
+                return true;
+            }
             try {
+                console.log('📡 Saving to Firebase...', DB.shop);
                 await FB.collection('shops').doc(DB.shop).set({
                     lastUpdated: new Date().toISOString(),
                     data: DB
-                });
+                }, { merge: false });
+                console.log('✅ Firebase save successful');
+                return true;
             } catch(e) {
-                console.error('Firebase error:', e);
+                console.error('❌ Firebase save error:', e.message);
+                return false;
             }
         }
 
@@ -1378,9 +1427,14 @@
         }
 
         function SAVE() {
-			localStorage.setItem('iceflow_prod_' + DB.shop, JSON.stringify(DB));
-            if (FIRESTORE_READY) {
-                SAVE_TO_FIREBASE();
+            try {
+                localStorage.setItem('iceflow_prod_' + DB.shop, JSON.stringify(DB));
+                console.log('✅ Saved to localStorage');
+                if (FIRESTORE_READY && FB) {
+                    SAVE_TO_FIREBASE().catch(err => console.error('Firebase error:', err));
+                }
+            } catch(e) {
+                console.error('❌ Save error:', e.message);
             }
         }
 
@@ -1388,7 +1442,7 @@
             if (FIRESTORE_READY) {
                 if (await LOAD_FROM_FIREBASE()) return;
             }
-			let data = localStorage.getItem('iceflow_prod_' + DB.shop);
+            let data = localStorage.getItem('iceflow_prod_' + DB.shop);
             if (data) DB = JSON.parse(data);
         }
 
