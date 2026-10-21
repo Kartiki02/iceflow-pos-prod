@@ -489,7 +489,7 @@
             currentCart: 0,
             currentCat: 'all',
             period: 'today',
-            customYear: 2026
+            customYear: new Date().getFullYear()
         };
 
         let EDIT_ID = null, CURRENT_BILL = null, CHART_INSTANCE = null;
@@ -1462,7 +1462,7 @@
             if (DB.currentCart === undefined) DB.currentCart = 0;
             if (!DB.currentCat) DB.currentCat = 'all';
             if (!DB.period) DB.period = 'today';
-            if (DB.customYear === undefined) DB.customYear = 2026;
+            if (DB.customYear === undefined) DB.customYear = new Date().getFullYear();
 
             console.log('   Items count:', DB.items.length);
             console.log('   Orders count:', DB.orders.length);
@@ -1489,7 +1489,7 @@
             document.getElementById('login').style.display = 'flex';
             document.getElementById('shopInput').value = '';
             document.getElementById('keyInput').value = '';
-            DB = {shop:'', cats:['ice-cream','toppings','combos','beverages','shakes','mastani'], items:[], orders:[], bills:[], inventoryBills:[], carts:[[],[],[],[],[]], currentCart:0, currentCat:'all', period:'today', customYear:2026};
+            DB = {shop:'', cats:['ice-cream','toppings','combos','beverages','shakes','mastani'], items:[], orders:[], bills:[], inventoryBills:[], carts:[[],[],[],[],[]], currentCart:0, currentCat:'all', period:'today', customYear:new Date().getFullYear()};
         }
     </script>
 </body>
