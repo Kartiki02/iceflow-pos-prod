@@ -1226,15 +1226,76 @@
         function DOWNLOAD_PDF(id) {
             const bill = DB.orders.find(b => b.id === id);
             if (!bill) return;
+            const jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+            if (jsPDF) { BUILD_PDF(bill, jsPDF); return; }
+            // fallback: render the bill HTML (kept off-screen inside a positioned holder)
             if (typeof html2pdf === 'undefined') { alert('PDF library failed to load. Reload the page and try again.'); return; }
+            const holder = document.createElement('div');
+            holder.style.cssText = 'position:absolute; left:-10000px; top:0;';
             const wrap = document.createElement('div');
-            wrap.style.cssText = 'position:fixed; left:0; top:0; width:380px; background:#fff; z-index:-1;';
+            wrap.style.cssText = 'width:380px; background:#fff;';
             wrap.innerHTML = BILL_HTML(bill);
-            document.body.appendChild(wrap);
+            holder.appendChild(wrap);
+            document.body.appendChild(holder);
             html2pdf().set({
                 margin: 5, filename: 'bill-' + bill.id + '.pdf', image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            }).from(wrap).save().then(() => wrap.remove()).catch(() => wrap.remove());
+                html2canvas: { scale: 2, scrollX: 0, scrollY: 0 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            }).from(wrap).save().then(() => holder.remove()).catch(() => holder.remove());
+        }
+
+        // Draws the bill directly as text (no screenshot), so it can never come out blank.
+        function BUILD_PDF(bill, jsPDF) {
+            const p = payParts(bill);
+            const money = n => 'Rs. ' + Math.round(n);        // the default PDF font has no rupee symbol
+            const W = 80, M = 5, RW = W - 2 * M;
+            const rows = [];
+            rows.push({ c: SHOP, b: true, size: 13 });
+            rows.push({ c: fmtDateTime(bill.date), size: 8 });
+            rows.push({ c: 'Order: ' + bill.id, size: 7 });
+            rows.push({ line: true });
+            rows.push({ l: 'Items', b: true });
+            bill.items.forEach(i => rows.push({ l: i.name + ' (' + money(i.price) + ') x' + i.qty, r: money(i.price * i.qty) }));
+            rows.push({ line: true });
+            rows.push({ l: 'Subtotal', r: money(bill.subtotal) });
+            if (bill.discount > 0) rows.push({ l: 'Discount', r: '-' + money(bill.discount) });
+            rows.push({ l: 'Total', r: money(bill.total), b: true, size: 11 });
+            rows.push({ line: true });
+            rows.push({ l: 'Payment: ' + bill.method });
+            if (p.cash > 0) rows.push({ l: 'Cash', r: money(p.cash) });
+            if (p.online > 0) rows.push({ l: 'Online', r: money(p.online) });
+            if (bill.received) rows.push({ l: 'Cash received', r: money(bill.received) });
+            if (bill.change > 0) rows.push({ l: 'Change returned', r: money(bill.change) });
+            if (bill.customer.name) rows.push({ l: 'Customer: ' + bill.customer.name });
+            if (bill.customer.contact) rows.push({ l: 'Contact: ' + bill.customer.contact });
+            rows.push({ line: true });
+            rows.push({ c: 'Thank you! Visit again.', size: 8 });
+
+            // measure with a scratch document first so the page height fits the content
+            const measure = new jsPDF({ unit: 'mm', format: [W, 400] });
+            measure.setFont('courier', 'normal');
+            const leftWidth = r => (r.r ? RW - 24 : RW);
+            let total = M * 2;
+            rows.forEach(r => {
+                if (r.line) { total += 3; return; }
+                measure.setFontSize(r.size || 9);
+                const n = r.c ? 1 : measure.splitTextToSize(r.l, leftWidth(r)).length;
+                total += n * ((r.size || 9) * 0.45) + 1.5;
+            });
+
+            const doc = new jsPDF({ unit: 'mm', format: [W, Math.max(60, Math.ceil(total))] });
+            let y = M + 3;
+            rows.forEach(r => {
+                if (r.line) { doc.setLineWidth(0.2); doc.line(M, y - 1, W - M, y - 1); y += 3; return; }
+                const size = r.size || 9;
+                doc.setFont('courier', r.b ? 'bold' : 'normal');
+                doc.setFontSize(size);
+                if (r.c) { doc.text(r.c, W / 2, y, { align: 'center' }); y += size * 0.45 + 1.5; return; }
+                const parts = doc.splitTextToSize(r.l, leftWidth(r));
+                doc.text(parts, M, y);
+                if (r.r) doc.text(r.r, W - M, y, { align: 'right' });
+                y += parts.length * (size * 0.45) + 1.5;
+            });
+            doc.save('bill-' + bill.id + '.pdf');
         }
         function DOWNLOAD_BILL() { if (CURRENT_BILL) DOWNLOAD_PDF(CURRENT_BILL.id); }
 
