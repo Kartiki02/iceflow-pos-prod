@@ -509,9 +509,28 @@
             return {
                 cats: Array.isArray(d.cats) ? d.cats : [],
                 items: Array.isArray(d.items) ? d.items : [],
+                carts: unpackCarts(d.carts),
                 orders: ords.docs.map(x => x.data()).sort((a, b) => new Date(a.date) - new Date(b.date)),
                 inventoryBills: invs.docs.map(x => x.data()).sort((a, b) => new Date(a.date) - new Date(b.date))
             };
+        }
+
+        // Carts are stored as [{items:[...]}, ...] because Firestore does not allow arrays inside arrays.
+        function packCarts(carts) {
+            return carts.map(c => ({ items: c.map(l => ({ id: l.id, name: l.name, price: l.price, icon: l.icon || '', qty: l.qty })) }));
+        }
+        function unpackCarts(raw) {
+            const out = [[],[],[],[],[]];
+            if (Array.isArray(raw)) raw.slice(0, 5).forEach((c, i) => { out[i] = Array.isArray(c && c.items) ? c.items : []; });
+            return out;
+        }
+        function META_DATA(items, carts) { return clean({ cats: DB.cats, items: items, carts: packCarts(carts) }); }
+
+        // open orders are saved to the cloud shortly after the last change
+        let CART_SAVE_TIMER = null;
+        function SAVE_CARTS_SOON() {
+            clearTimeout(CART_SAVE_TIMER);
+            CART_SAVE_TIMER = setTimeout(() => { if (SHOP) SAVE(); }, 1500);
         }
 
         function NORMALIZE() {
@@ -533,7 +552,7 @@
             DB = newDB();
             try {
                 const c = await FETCH_CLOUD();
-                DB.cats = c.cats; DB.items = c.items; DB.orders = c.orders; DB.inventoryBills = c.inventoryBills;
+                DB.cats = c.cats; DB.items = c.items; DB.orders = c.orders; DB.inventoryBills = c.inventoryBills; DB.carts = c.carts;
                 CLOUD_LOADED = true;
                 SET_SYNC('ok');
             } catch (e) {
@@ -556,7 +575,7 @@
             try {
                 SET_SYNC('saving');
                 const c = await FETCH_CLOUD();
-                DB.cats = c.cats; DB.items = c.items; DB.orders = c.orders; DB.inventoryBills = c.inventoryBills;
+                DB.cats = c.cats; DB.items = c.items; DB.orders = c.orders; DB.inventoryBills = c.inventoryBills; DB.carts = c.carts;
                 NORMALIZE(); CACHE_LOCAL(); SET_SYNC('ok'); RENDER_ALL();
                 if (el('reports').classList.contains('show')) RENDER_REPORTS();
             } catch (e) { SET_SYNC('error'); alert('Could not refresh from the cloud.'); }
@@ -570,7 +589,7 @@
             try {
                 await withTimeout(FB.collection('shops').doc(SHOP).set({
                     lastUpdated: new Date().toISOString(),
-                    data: clean({ cats: DB.cats, items: DB.items })
+                    data: META_DATA(DB.items, DB.carts)
                 }), 15000);
                 SET_SYNC('ok');
                 return true;
@@ -627,7 +646,7 @@
             const existing = cart.find(i => i.id === id);
             if (existing) existing.qty++;
             else cart.push({ id: item.id, name: item.name, price: item.price, icon: item.icon, qty: 1 });
-            RENDER_CART();
+            RENDER_CART(); SAVE_CARTS_SOON();
         }
 
         function RENDER_CART() {
@@ -647,10 +666,10 @@
             if (!line) return;
             line.qty += change;
             if (line.qty <= 0) DB.carts[DB.currentCart] = cart.filter(i => i.id !== id);
-            RENDER_CART();
+            RENDER_CART(); SAVE_CARTS_SOON();
         }
-        function REMOVE_ITEM(id) { DB.carts[DB.currentCart] = DB.carts[DB.currentCart].filter(i => i.id !== id); RENDER_CART(); }
-        function CLEAR_CART() { DB.carts[DB.currentCart] = []; RENDER_CART(); }
+        function REMOVE_ITEM(id) { DB.carts[DB.currentCart] = DB.carts[DB.currentCart].filter(i => i.id !== id); RENDER_CART(); SAVE_CARTS_SOON(); }
+        function CLEAR_CART() { DB.carts[DB.currentCart] = []; RENDER_CART(); SAVE_CARTS_SOON(); }
 
         function RENDER_SLOTS() {
             let html = '';
@@ -768,7 +787,8 @@
                         const ref = FB.collection('shops').doc(SHOP);
                         const batch = FB.batch();
                         batch.set(ref.collection('orders').doc(order.id), clean(order));
-                        batch.set(ref, { lastUpdated: new Date().toISOString(), data: clean({ cats: DB.cats, items: newItems }) });
+                        const cartsAfter = DB.carts.map((c, i) => i === DB.currentCart ? [] : c);
+                        batch.set(ref, { lastUpdated: new Date().toISOString(), data: META_DATA(newItems, cartsAfter) });
                         await withTimeout(batch.commit(), 15000);
                         SET_SYNC('ok');
                     } catch (e) {
@@ -1151,7 +1171,7 @@
                     const ref = FB.collection('shops').doc(SHOP);
                     const batch = FB.batch();
                     batch.delete(ref.collection('orders').doc(id));
-                    batch.set(ref, { lastUpdated: new Date().toISOString(), data: clean({ cats: DB.cats, items: newItems }) });
+                    batch.set(ref, { lastUpdated: new Date().toISOString(), data: META_DATA(newItems, DB.carts) });
                     await withTimeout(batch.commit(), 15000);
                     SET_SYNC('ok');
                 } catch (e) {
