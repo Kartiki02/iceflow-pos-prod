@@ -108,6 +108,7 @@
             <input id="shopInput" type="text" placeholder="Shop Name" autocomplete="off">
             <input id="keyInput" type="password" placeholder="License Key" autocomplete="new-password">
             <button id="loginBtn" onclick="LOGIN()">Login</button>
+            <p style="text-align:center; margin-top:14px; font-size:11px; color:#aab;">Version 2026.10.22</p>
 
         </div>
     </div>
@@ -588,9 +589,11 @@
         // ---------- rendering ----------
         function RENDER_ALL() {
             if (DB.currentCat !== 'all' && !DB.cats.includes(DB.currentCat)) DB.currentCat = 'all';
-            RENDER_CATS(); RENDER_MENU(); RENDER_SLOTS(); RENDER_CART();
-            RENDER_CAT_TABLE(); RENDER_INV_TABLE(); UPDATE_CAT_SELECT();
-            RENDER_BILLS_TABLE(); RENDER_INV_BILLS();
+            // each step is isolated so one bad record can never blank the rest of the screen
+            [RENDER_SLOTS, RENDER_CART, RENDER_CATS, RENDER_MENU, RENDER_CAT_TABLE, RENDER_INV_TABLE,
+             UPDATE_CAT_SELECT, RENDER_BILLS_TABLE, RENDER_INV_BILLS].forEach(fn => {
+                try { fn(); } catch (e) { console.error(fn.name + ' failed:', e); }
+            });
         }
 
         // ---------- POS ----------
